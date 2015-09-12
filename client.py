@@ -37,6 +37,8 @@ class Client:
 		self.status = 'disconnected'
 		## Logger, for internal usage
 		self.log = logging.getLogger('client')
+		## Features sent with 0xb9 packet
+		self.features = None
 
 	@status('disconnected')
 	def connect(self, ip, port, user, pwd):
@@ -92,9 +94,16 @@ class Client:
 		self.log.info('logging in')
 		self.send(bytes([net.Packet.GAME_SERVER_LOGIN]) + bkey + net.Util.fixStr(self.server['user'],30) + net.Util.fixStr(self.server['pass'],30))
 
-		print(self.receive())
-		#self.status = 'loggedin'
-		# TODO: handle encryption form now on
+		# From now on, server will use compression
+		self.net.compress = True
+
+		# Get features packet
+		pkt = self.receive(net.Packet.ENABLE_FEATURES)
+		self.features = pkt.features
+
+		# Get character selection
+		pkt = self.receive()
+		print(pkt)
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
