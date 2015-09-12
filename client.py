@@ -5,9 +5,8 @@ Ultima online text client (experiment)
 '''
 
 import struct
-import ipaddress
 import logging
-
+import ipaddress
 import net
 
 
@@ -39,6 +38,10 @@ class Client:
 		self.log = logging.getLogger('client')
 		## Features sent with 0xb9 packet
 		self.features = None
+		## Flags sent with 0xa9 packet
+		self.flags = None
+		## Locations sent with 0xa9 packets
+		self.locs = None
 
 	@status('disconnected')
 	def connect(self, ip, port, user, pwd):
@@ -63,10 +66,14 @@ class Client:
 
 		# Send account login request
 		self.log.info('logging in')
-		self.send(bytes([net.Packet.LOGIN_REQUEST]) + net.Util.fixStr(self.server['user'],30) + net.Util.fixStr(self.server['pass'],30) + bytes([0x00]))
+		po = net.PacketOut(net.Ph.LOGIN_REQUEST)
+		po.string(self.server['user'], 30)
+		po.string(self.server['pass'], 30)
+		po.byte(0x00)
+		self.send(po)
 
 		# Get servers list
-		pkt = self.receive(net.Packet.SERVER_LIST)
+		pkt = self.receive(net.Ph.SERVER_LIST)
 		self.log.info("Received serverlist: %s", str(pkt.servers))
 
 		self.status = 'connected'
@@ -78,7 +85,7 @@ class Client:
 		self.log.info('selecting server %d', idx)
 		self.send(struct.pack('>BH', 0xa0, idx))
 
-		pkt = self.receive(net.Packet.CONNECT_TO_GAME_SERVER)
+		pkt = self.receive(net.Ph.CONNECT_TO_GAME_SERVER)
 		ip = '.'.join(map(str, pkt.ip))
 		self.log.info("Connecting to gameserver ip %s, port %s (key %s)", ip, pkt.port, pkt.key)
 
@@ -92,21 +99,52 @@ class Client:
 
 		# Send login
 		self.log.info('logging in')
-		self.send(bytes([net.Packet.GAME_SERVER_LOGIN]) + bkey + net.Util.fixStr(self.server['user'],30) + net.Util.fixStr(self.server['pass'],30))
+		po = net.PacketOut(net.Ph.GAME_SERVER_LOGIN)
+		po.uint(pkt.key)
+		po.string(self.server['user'], 30)
+		po.string(self.server['pass'], 30)
+		self.send(po)
 
 		# From now on, server will use compression
 		self.net.compress = True
 
 		# Get features packet
-		pkt = self.receive(net.Packet.ENABLE_FEATURES)
+		pkt = self.receive(net.Ph.ENABLE_FEATURES)
 		self.features = pkt.features
 
 		# Get character selection
-		pkt = self.receive()
-		print(pkt)
+		pkt = self.receive(net.Ph.CHARACTERS)
+		self.flags = pkt.flags
+		self.locs = pkt.locs
+
+		self.status = 'loggedin'
+		return pkt.chars
+
+	@status('loggedin')
+	def selectCharacter(self, name, idx):
+		''' Login the character with the given name '''
+		self.log.info('selecting character %s', name)
+		po = net.PacketOut(net.Ph.LOGIN_CHARACTER)
+		po.uint(0xedededed) #Pattern1
+		po.string(name, 30) #Char name
+		po.ushort(0x0000)   #unknown0
+		po.uint(0x00000000) #clientflag
+		po.uint(0x00000000) #unknown1
+		po.uint(0x0000001d) #login count
+		po.uint(0x00000000) # unknown2
+		po.uint(0x00000000) # unknown2
+		po.uint(0x00000000) # unknown2
+		po.uint(0x00000000) # unknown2
+		po.uint(idx) # slot chosen
+		po.ip('127.0.0.1')
+		self.send(po)
+
+		print(self.receive())
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
+		if isinstance(data, net.PacketOut):
+			data = data.getBytes()
 		self.net.send(data)
 
 	def receive(self, expect=None):
@@ -144,5 +182,7 @@ if __name__ == '__main__':
 
 	c = Client()
 	servers = c.connect(args.ip, args.port, args.user, args.pwd)
-	c.selectServer(3)
+	chars = c.selectServer(3)
+	c.selectCharacter('Developer Bodom', 1)
+
 	print('done')

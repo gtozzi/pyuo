@@ -2,8 +2,10 @@
 
 ''' Network classes for python UO client '''
 
+import abc
 import socket
 import struct
+import ipaddress
 import logging
 
 
@@ -310,26 +312,14 @@ class Network:
 		else:
 			raw = self.buf
 
-		# Process it
-		cmd = raw[0]
-		c = 1
-		if cmd in (Packet.ENABLE_FEATURES, ):
-			length = 3
-		elif cmd in (Packet.CONNECT_TO_GAME_SERVER, ):
-			length = 11
-		elif cmd in (Packet.SERVER_LIST, ):
-			length = struct.unpack('>H',raw[c : c+2])[0]
-			c += 2
-		else:
-			raise NotImplementedError("Unknown cmd 0x%0.2X" % cmd)
-		data = raw[c : c+length]
-		c += length
+		self.log.debug('<- 0x%0.2X %s"%s"', raw[0], 'C' if self.compress else '', raw)
 
-		self.log.debug('<- 0x%0.2X %s"%s"', cmd, 'C' if self.compress else '', data)
-		pkt = Packet(cmd, length, data)
+		pkt = Ph.process(raw)
+		pkt.validate()
+		assert pkt.validated
 
 		# Remove the processed packet from the buffer the buffer
-		self.buf = self.buf[c:]
+		self.buf = self.buf[pkt.length:]
 
 		return pkt
 
@@ -371,42 +361,198 @@ class Network:
 
 
 class Packet:
-	''' An UO packet '''
+	''' Base class for packets '''
 
-	SERVER_LIST = 0xa8
+	def __init__(self, buf):
+		self.log = logging.getLogger('packet')
+		self.buf = buf
+		self.readCount = 0
+		self.validated = False
+		cmd = self.byte()
+		if cmd != self.cmd:
+			raise RuntimeError("Invalid data for this packet {} <> {}".format(cmd, self.cmd))
+
+	def pb(self, num):
+		''' Returns the given number of characters from the gibven buffer '''
+		self.readCount += num
+		ret = self.buf[:num]
+		self.buf = self.buf[num:]
+		return ret
+
+	def byte(self):
+		''' Returns next byte from the buffer '''
+		return ord(self.pb(1))
+
+	def ushort(self):
+		''' Returns next unsigned short from the buffer '''
+		return struct.unpack('>H', self.pb(2))[0]
+
+	def uint(self):
+		''' Returns next unsigned int from the buffer '''
+		return struct.unpack('>I', self.pb(4))[0]
+
+	def string(self, length):
+		''' Returns next string of the given length from the buffer '''
+		return Util.varStr(self.pb(length))
+
+	def ip(self):
+		''' Returns next string ip address from the buffer '''
+		return struct.unpack('BBBB', self.pb(4))
+
+	def validate(self):
+		''' Do validations things, but be called at end of init '''
+		if( self.length != self.readCount ):
+			self.log.debug(self.__dict__)
+			raise RuntimeError("Len mismatch on packet 0x{:02x} ({} <> {})".format(self.cmd, self.length, self.readCount))
+		self.validated = True
+
+
+class ServerListPacket(Packet):
+	''' Receive server list '''
+
+	cmd = 0xa8
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.flag = self.byte()
+		self.numServers = self.ushort()
+		self.servers = []
+		for i in range(0, self.numServers):
+			self.servers.append({
+				'idx': self.ushort(),
+				'name': self.string(32),
+				'full': self.byte(),
+				'tz': self.byte(),
+				'ip': self.ip(),
+			})
+
+
+class EnableFeaturesPacket(Packet):
+	''' Used to enable client features '''
+
+	cmd = 0xb9
+	length = 3
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.features = self.ushort()
+
+
+class ConnectToGameServerPacket(Packet):
+	''' Login server is requesting to connect to the game server '''
+
+	cmd = 0x8c
+	length = 11
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.ip = self.ip()
+		self.port = self.ushort()
+		self.key = self.uint()
+
+
+class CharactersPacket(Packet):
+	''' Gets lists of characters and starting locations from server '''
+
+	cmd = 0xa9
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.numChars = self.byte()
+		self.chars = []
+		for i in range(0, self.numChars):
+			self.chars.append({
+				'name': self.string(30),
+				'pass': self.string(30),
+			})
+		self.numLocs = self.byte()
+		self.locs = []
+		for i in range(0, self.numLocs):
+			self.locs.append({
+				'idx': self.byte(),
+				'name': self.string(31),
+				'area': self.string(31),
+			})
+		self.flags = self.uint()
+
+
+class Ph:
+	''' Packet Handler '''
+
+	SERVER_LIST = ServerListPacket.cmd
+	LOGIN_CHARACTER = 0x5d
 	LOGIN_REQUEST = 0x80
-	CONNECT_TO_GAME_SERVER = 0x8c
+	CHARACTERS = CharactersPacket.cmd
+	CONNECT_TO_GAME_SERVER = ConnectToGameServerPacket.cmd
 	GAME_SERVER_LOGIN = 0x91
-	ENABLE_FEATURES = 0xb9
+	ENABLE_FEATURES = EnableFeaturesPacket.cmd
 
-	def __init__(self, cmd, length, data):
-		self.cmd = cmd
-		self.length = length
-		self.data = data
+	HANDLERS = {
+		SERVER_LIST: ServerListPacket,
+		CONNECT_TO_GAME_SERVER: ConnectToGameServerPacket,
+		ENABLE_FEATURES: EnableFeaturesPacket,
+		CHARACTERS: CharactersPacket,
+	}
 
-		if self.cmd == Packet.SERVER_LIST:
-			self.descr = 'Receive Server List'
-			self.flag = self.data[0]
-			self.numServers = struct.unpack('>H',self.data[1:3])[0]
-			self.servers = []
-			for i in range(0, self.numServers):
-				o = i * 40
-				self.servers.append({
-					'idx': struct.unpack('>H',self.data[3+o:5+o])[0],
-					'name': Util.varStr(self.data[5+o:36+o]),
-					'full': self.data[36+o],
-					'tz': self.data[37+o],
-					'ip': struct.unpack('BBBB',self.data[39+o:43+o]),
-				})
+	@staticmethod
+	def process(buf):
+		''' Init next packet from buffer, returns a packet instance '''
+		cmd = buf[0]
+		try:
+			return Ph.HANDLERS[cmd](buf)
+		except KeyError:
+			raise NotImplementedError("Unknown packet 0x%0.2X" % cmd)
 
-		elif self.cmd == Packet.CONNECT_TO_GAME_SERVER:
-			self.descr = 'Connect to Game Server'
-			self.ip = struct.unpack('BBBB',self.data[0:4])
-			self.port = struct.unpack('>H',self.data[4:6])[0]
-			self.key = struct.unpack('>I',self.data[6:12])[0]
 
-		elif self.cmd == Packet.ENABLE_FEATURES:
-			self.features = struct.unpack('>H',self.data[0:3])[0]
+class PacketOut:
+	''' Helper class for outputting a packet '''
+	def __init__(self, cmd):
+		self.buf = b''
+		self.byte(cmd)
+
+	def byte(self, val):
+		''' Add a byte to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 255:
+			raise ValueError("Byte {} out of range".format(val))
+		self.buf += bytes((val, ))
+
+	def ushort(self, val):
+		''' Adds an unsigned short to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 0xffff:
+			raise ValueError("UShort {} out of range".format(val))
+		self.buf += struct.pack('>H', val)
+
+	def uint(self, val):
+		''' Adds and unsigned int to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 0xffffffff:
+			raise ValueError("UInt {} out of range".format(val))
+		self.buf += struct.pack('>I', val)
+
+	def string(self, val, length):
+		''' Adds a string to the packet '''
+		if not isinstance(val, str):
+			raise TypeError("Expected str, got {}".format(type(val)))
+		if len(val) > length:
+			raise ValueError('String "{}" too long'.format(val))
+		self.buf += Util.fixStr(val, length)
+
+	def ip(self, val):
+		''' Adds an ip to the packet '''
+		if not isinstance(val, str):
+			raise TypeError("Expected str, got {}".format(type(val)))
+		self.buf += ipaddress.ip_address(val).packed
+
+	def getBytes(self):
+		''' Returns the packet as bytes '''
+		return self.buf
 
 
 class Util:
