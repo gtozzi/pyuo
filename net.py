@@ -478,6 +478,126 @@ class CharactersPacket(Packet):
 		self.flags = self.uint()
 
 
+class CharLocaleBodyPacket(Packet):
+	''' Server giving info about Char, Locale, and Body '''
+
+	cmd = 0x1b
+	length = 37
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		unk = self.uint() # Uknown
+		self.bodyType = self.ushort()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		unk = self.byte() # Unknown
+		self.z = self.byte()
+		self.facing = self.byte()
+		unk = self.uint() # Unknown
+		unk = self.uint() # Unknown
+		unk = self.byte() # Unknown
+		self.widthM8 = self.ushort()
+		self.height = self.ushort()
+		unk = self.ushort() # Unknown
+		unk = self.uint() # Unknown
+
+
+class GeneralInfoPacket(Packet):
+	''' This packet does a lot of different things, based on subcommand '''
+
+	## Initialize fastwalk prevention
+	SUB_FASTWALK = 0x01
+	## Add a key to fastwalk stack
+	SUB_ADDFWKEY = 0x02
+	## Close generic gump
+	SUB_CLOSEGUMP = 0x04
+	## Screen size
+	SUB_SCREENSIZE = 0x05
+	## Party system
+	SUB_PARTY = 0x06
+	## Set cursor hue / set map
+	SUB_CURSORMAP = 0x08
+	## Wrestling stun
+	SUB_STUN = 0x0a
+	## CLient language
+	SUB_LANG = 0x0b
+	## Closed status gump
+	SUB_CLOSESTATUS = 0x0c
+	## 3D Action
+	SUB_3DACT = 0x0e
+
+	cmd = 0xbf
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.sub = self.ushort()
+
+		if self.sub == self.SUB_FASTWALK:
+			self.keys = []
+			for i in range(0, 6):
+				self.keys.append(self.uint())
+
+		elif self.sub == self.SUB_ADDFWKEY:
+			self.key = self.uint()
+
+		elif self.sub == self.SUB_CLOSEGUMP:
+			self.gumpid = self.uint()
+			self.buttonid = self.uint()
+
+		elif self.sub == self.SUB_SCREENSIZE:
+			unk = self.ushort()
+			self.x = self.ushort()
+			self.y = self.ushort()
+			unk = self.ushort()
+
+		elif self.sub == self.SUB_PARTY:
+			raise NotImplementedError()
+
+		elif self.sub == self.SUB_CURSORMAP:
+			self.cursor = self.byte()
+
+		elif self.sub == self.SUB_STUN:
+			raise NotImplementedError("This should no longer be used")
+
+		elif self.sub == self.SUB_LANG:
+			self.lang = self.string(3)
+
+		elif self.sub == self.SUB_CLOSESTATUS:
+			self.serial = self.uint()
+
+		elif self.sub == self.SUB_3DACT:
+			self.animation = self.uint()
+
+		else:
+			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
+
+
+class Unk32Packet(Packet):
+	''' Unknown packet '''
+
+	cmd = 0x32
+	length = 2
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.byte()
+
+
+class ControlAnimationPacket(Packet):
+	''' Control Animation '''
+
+	cmd = 0x1e
+	length = 4
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.byte() # Unknown
+		self.byte() # Unknown
+		self.byte() # Unknown
+
+
 class Ph:
 	''' Packet Handler '''
 
@@ -488,12 +608,20 @@ class Ph:
 	CONNECT_TO_GAME_SERVER = ConnectToGameServerPacket.cmd
 	GAME_SERVER_LOGIN = 0x91
 	ENABLE_FEATURES = EnableFeaturesPacket.cmd
+	CHAR_LOCALE_BODY = CharLocaleBodyPacket.cmd
+	GENERAL_INFO = GeneralInfoPacket.cmd
+	UNKNOWN_32 = Unk32Packet.cmd
+	CONTROL_ANIMATION = ControlAnimationPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST: ServerListPacket,
 		CONNECT_TO_GAME_SERVER: ConnectToGameServerPacket,
 		ENABLE_FEATURES: EnableFeaturesPacket,
 		CHARACTERS: CharactersPacket,
+		CHAR_LOCALE_BODY: CharLocaleBodyPacket,
+		GENERAL_INFO: GeneralInfoPacket,
+		UNKNOWN_32: Unk32Packet,
+		CONTROL_ANIMATION: ControlAnimationPacket,
 	}
 
 	@staticmethod

@@ -43,6 +43,27 @@ class Client:
 		## Locations sent with 0xa9 packets
 		self.locs = None
 
+		## Current player's serial
+		self.serial = None
+		## Current player's graphic
+		self.graphic = None
+		## Current player's X coordinate
+		self.x = None
+		## Current player's X coordinate
+		self.y = None
+		## Current player's X coordinate
+		self.z = None
+		## Current player's facing
+		self.facing = None
+
+		## Current Realm's width
+		self.width = None
+		## Current Realm's height
+		self.height = None
+
+		## Current cursor (0 = Felucca, unhued / BRITANNIA map. 1 = Trammel, hued gold / BRITANNIA map, 2 = (switch to) ILSHENAR map)
+		self.cursor = None
+
 	@status('disconnected')
 	def connect(self, ip, port, user, pwd):
 		''' Conmnects to the server, returns a list of gameservers
@@ -74,7 +95,7 @@ class Client:
 
 		# Get servers list
 		pkt = self.receive(net.Ph.SERVER_LIST)
-		self.log.info("Received serverlist: %s", str(pkt.servers))
+		self.log.debug("Received serverlist: %s", str(pkt.servers))
 
 		self.status = 'connected'
 		return pkt.servers
@@ -139,7 +160,50 @@ class Client:
 		po.ip('127.0.0.1')
 		self.send(po)
 
-		print(self.receive())
+		self.status = 'game'
+
+	@status('game')
+	def play(self):
+		''' Starts the endless game loop '''
+		while True:
+			pkt = self.receive()
+
+			if isinstance(pkt, net.CharLocaleBodyPacket):
+				assert self.serial is None
+				self.serial = pkt.serial
+				assert self.graphic is None
+				self.graphic = pkt.bodyType
+				assert self.x is None
+				self.x = pkt.x
+				assert self.y is None
+				self.y = pkt.y
+				assert self.z is None
+				self.z = pkt.z
+				assert self.facing is None
+				self.facing = pkt.facing
+				assert self.width is None
+				self.width = pkt.widthM8 + 8
+				assert self.height is None
+				self.height = pkt.height
+
+				self.log.info("Realm size: %d,%d", self.width, self.height)
+				self.log.info("You are 0x%X and your graphic is 0x%X", self.serial, self.graphic)
+				self.log.info("Position: %d,%d,%d facing %d", self.x, self.y, self.z, self.facing)
+
+			elif isinstance(pkt, net.GeneralInfoPacket):
+				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
+					self.cursor = pkt.cursor
+				else:
+					raise RuntimeError("Unhandled subpacket {}".format(pkt.sub))
+
+			elif isinstance(pkt, net.Unk32Packet):
+				self.log.warn("Unknown 32 packet received")
+
+			elif isinstance(pkt, net.ControlAnimationPacket):
+				pass
+
+			else:
+				raise RuntimeError("Unhandled packet {}".format(pkt.__class__))
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
@@ -178,11 +242,11 @@ if __name__ == '__main__':
 	parser.add_argument('pwd', help='Password')
 	args = parser.parse_args()
 
-	logging.basicConfig(level=logging.DEBUG)
+	logging.basicConfig(level=logging.INFO)
 
 	c = Client()
 	servers = c.connect(args.ip, args.port, args.user, args.pwd)
 	chars = c.selectServer(3)
 	c.selectCharacter('Developer Bodom', 1)
-
+	c.play()
 	print('done')
