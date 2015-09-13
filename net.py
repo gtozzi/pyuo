@@ -308,14 +308,16 @@ class Network:
 				wait = True
 
 		if self.compress:
-			raw = self.decompress(self.buf)
+			raw, size = self.decompress(self.buf)
 		else:
 			raw = self.buf
+			size = len(self.buf)
 
 		if not raw:
 			raise NotImplementedError()
 
-		self.log.debug('<- 0x%0.2X, %d bytes, %s\n"%s"', raw[0], len(raw), 'compressed' if self.compress else 'not compressed', raw)
+		cinfo = '{} compressed'.format(size) if self.compress else 'not compressed'
+		self.log.debug('<- 0x%0.2X, %d bytes, %s\n"%s"', raw[0], len(raw), cinfo, raw)
 
 		pkt = Ph.process(raw)
 		pkt.validate()
@@ -323,11 +325,14 @@ class Network:
 		assert pkt.length == len(raw)
 
 		# Remove the processed packet from the buffer the buffer
-		self.buf = self.buf[pkt.length:]
+		self.buf = self.buf[size:]
 
 		return pkt
 
 	def decompress(self, buf):
+		''' Internal usage, decompress a packet (thanks to UltimaXNA project
+		@return tuple (decompressed, compressed_size)
+		'''
 		node = 0
 		leaf = 0
 		leafVal = 0
@@ -338,12 +343,13 @@ class Network:
 		while srcPos < len(buf):
 			# Gets next bit
 			leaf = ( buf[srcPos] >> ( bitNum - 1 ) ) & 1
+			# Look into decompression table
 			leafVal = self.DECOMPRESSION_TREE[node][leaf]
 
 			# all numbers below 1 (0..-256) are codewords
 			# if the halt codeword has been found, skip this byte
 			if leafVal == -256:
-				return dest
+				return ( dest, srcPos + 1)
 			elif leafVal < 1:
 				dest += bytes([0 - leafVal])
 				leafVal = 0
@@ -358,10 +364,9 @@ class Network:
 			# check to see if the current codeword has no end
 			# if not, make it an incomplete byte
 			if srcPos == len(buf):
-				if node != 0:
-					return False;
-				else:
-					raise NotImplementedError("Incomplete packet")
+				raise NotImplementedError("Incomplete packet")
+
+		raise NotImplementedError("No data")
 
 
 class Packet:
