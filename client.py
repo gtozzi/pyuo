@@ -24,7 +24,112 @@ class status:
 		return wrapper
 
 
+class UOBject:
+	''' Base class for an UO Object '''
+
+	def __init__(self):
+		## Unique serial number
+		self.serial = None
+		## Graphic ID
+		self.graphic = None
+		## Color ID
+		self.color = None
+		## X coordinate
+		self.x = None
+		## Y coordinate
+		self.y = None
+		## z coordinate
+		self.z = None
+		## Facing
+		self.facing = None
+
+
+class Item(UOBject):
+	''' Represents an item in the world '''
+
+	def __init__(self, pkt=None):
+		super().__init__()
+
+		## Number of items in the stack
+		self.amount = None
+		## Status flags
+		self.status = None
+
+		if pkt is not None:
+			if not isinstance(pkt, net.ObjectInfoPacket):
+				raise ValueError("Expecting a DrawObjectPacket")
+			self.serial = pkt.serial
+			self.graphic = pkt.graphic
+			self.amount = pkt.count
+			self.x = pkt.x
+			self.y = pkt.y
+			self.z = pkt.z
+			self.facing = pkt.facing
+			self.color = pkt.color
+			self.status = pkt.flag
+
+	def __repr__(self):
+		return "{amount}x Item 0x{serial:02X} graphic 0x{graphic:02X} color 0x{color:02X} at {x},{y},{z} facing {facing}".format(**self.__dict__)
+
+
+class Mobile(UOBject):
+	''' Represents a mobile in the world '''
+
+	def __init__(self, pkt=None):
+		super().__init__()
+
+		## Status flags
+		## 0x00: Normal
+		## 0x01: Unknown
+		## 0x02: Can Alter Paperdoll
+		## 0x04: Poisoned
+		## 0x08: Golden Health
+		## 0x10: Unknown
+		## 0x20: Unknown
+		## 0x40: War Mode
+		self.status = None
+		## War mode flag
+		self.war = None
+		## Notoriety
+		## 0x1: Innocent (Blue)
+		## 0x2: Friend (Green)
+		## 0x3: Grey (Grey - Animal)
+		## 0x4: Criminal (Grey)
+		## 0x5: Enemy (Orange)
+		## 0x6: Murderer (Red)
+		## 0x7: Invulnerable (Yellow)
+		self.notoriety = None
+
+		if pkt is not None:
+			if not isinstance(pkt, net.DrawObjectPacket):
+				raise ValueError("Expecting a DrawObjectPacket")
+			self.serial = pkt.serial
+			self.graphic = pkt.graphic
+			self.x = pkt.x
+			self.y = pkt.y
+			self.z = pkt.z
+			self.facing = pkt.facing
+			self.color = pkt.color
+			self.status = pkt.flag
+			self.notoriety = pkt.notoriety
+			##TODO: handle equip
+
+	def __repr__(self):
+		return "Mobile 0x{serial:02X} graphic 0x{graphic:02X} color 0x{color:02X} at {x},{y},{z} facing {facing}".format(**self.__dict__)
+
+
+class Player(Mobile):
+	''' Represents the current player '''
+
+	def __init__(self):
+		super().__init__()
+
+		## Current target serial
+		self.target = None
+
+
 class Client:
+	''' The main client instance '''
 
 	def __init__(self):
 		## Dict info about last server connected to {ip, port, user, pass}
@@ -34,6 +139,8 @@ class Client:
 		## - connected: Connected and logged in, server not selected
 		## - loggedin: Connected to game server, character not selected
 		self.status = 'disconnected'
+		## Login complete, will be false during the initial fase of the game
+		self.lc = False
 		## Logger, for internal usage
 		self.log = logging.getLogger('client')
 		## Features sent with 0xb9 packet
@@ -43,18 +150,12 @@ class Client:
 		## Locations sent with 0xa9 packets
 		self.locs = None
 
-		## Current player's serial
-		self.serial = None
-		## Current player's graphic
-		self.graphic = None
-		## Current player's X coordinate
-		self.x = None
-		## Current player's X coordinate
-		self.y = None
-		## Current player's X coordinate
-		self.z = None
-		## Current player's facing
-		self.facing = None
+		## Reference to player, character instance
+		self.player = None
+		## Dictionary of mobs around, by serial
+		self.mobs = {}
+		## Dictionary of items around, by serial
+		self.items = {}
 
 		## Current Realm's width
 		self.width = None
@@ -90,7 +191,7 @@ class Client:
 		po = net.PacketOut(net.Ph.LOGIN_REQUEST)
 		po.string(self.server['user'], 30)
 		po.string(self.server['pass'], 30)
-		po.byte(0x00)
+		po.uchar(0x00)
 		self.send(po)
 
 		# Get servers list
@@ -169,38 +270,125 @@ class Client:
 			pkt = self.receive()
 
 			if isinstance(pkt, net.CharLocaleBodyPacket):
-				assert self.serial is None
-				self.serial = pkt.serial
-				assert self.graphic is None
-				self.graphic = pkt.bodyType
-				assert self.x is None
-				self.x = pkt.x
-				assert self.y is None
-				self.y = pkt.y
-				assert self.z is None
-				self.z = pkt.z
-				assert self.facing is None
-				self.facing = pkt.facing
+				if self.lc:
+					raise NotImplementedError("Unexpected")
+
+				assert self.player is None
+				self.player = Player()
+
+				assert self.player.serial is None
+				self.player.serial = pkt.serial
+				assert self.player.graphic is None
+				self.player.graphic = pkt.bodyType
+				assert self.player.x is None
+				self.player.x = pkt.x
+				assert self.player.y is None
+				self.player.y = pkt.y
+				assert self.player.z is None
+				self.player.z = pkt.z
+				assert self.player.facing is None
+				self.player.facing = pkt.facing
 				assert self.width is None
 				self.width = pkt.widthM8 + 8
 				assert self.height is None
 				self.height = pkt.height
 
 				self.log.info("Realm size: %d,%d", self.width, self.height)
-				self.log.info("You are 0x%X and your graphic is 0x%X", self.serial, self.graphic)
-				self.log.info("Position: %d,%d,%d facing %d", self.x, self.y, self.z, self.facing)
+				self.log.info("You are 0x%X and your graphic is 0x%X", self.player.serial, self.player.graphic)
+				self.log.info("Position: %d,%d,%d facing %d", self.player.x, self.player.y, self.player.z, self.player.facing)
+
+			elif isinstance(pkt, net.DrawGamePlayerPacket):
+				assert self.player.serial == pkt.serial
+				assert self.player.graphic == pkt.graphic
+				assert self.player.x == pkt.x
+				assert self.player.y == pkt.y
+				assert self.player.z == pkt.z
+				#assert self.player.facing == pkt.direction
+
+				self.player.color = pkt.hue
+				self.player.status = pkt.flag
+
+				self.log.info("Your color is %d and your status is 0x%X", self.player.color, self.player.status)
+
+			elif isinstance(pkt, net.DrawObjectPacket):
+				assert self.lc
+				mob = Mobile(pkt)
+				assert mob.serial not in self.mobs.keys()
+				self.log.info("New mobile: %s", mob)
+				self.mobs[mob.serial] = mob
+
+			elif isinstance(pkt, net.ObjectInfoPacket):
+				assert self.lc
+				item = Item(pkt)
+				assert item.serial not in self.items.keys()
+				self.log.info("New item: %s", item)
+				self.items[item.serial] = item
+
+			elif isinstance(pkt, net.WarModePacket):
+				assert self.player.war is None
+				self.player.war = pkt.war
+
+			elif isinstance(pkt, net.AllowAtackPacket):
+				assert self.lc
+				self.player.target = pkt.serial
+				self.log.info("Target set to 0x%X", self.player.target)
 
 			elif isinstance(pkt, net.GeneralInfoPacket):
 				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
 					self.cursor = pkt.cursor
+				elif pkt.sub == net.GeneralInfoPacket.SUB_MAPDIFF:
+					pass
+				elif pkt.sub == net.GeneralInfoPacket.SUB_PARTY:
+					self.log.info("Ignoring party system data")
 				else:
-					self.log.warn("Unhandled GeneralInfo subpacket 0x{:02X}".format(pkt.sub))
+					self.log.warn("Unhandled GeneralInfo subpacket 0x%X", pkt.sub)
+
+			elif isinstance(pkt, net.TipWindowPacket):
+				assert self.lc
+				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
+
+			elif isinstance(pkt, net.SendSpeechPacket):
+				assert self.lc
+				if pkt.type == 0x00:
+					what = "Say"
+				elif pkt.type == 0x01:
+					what = "Broadcast"
+				elif pkt.type == 0x02:
+					what = "Emote"
+				elif pkt.type == 0x07:
+					what = "Message"
+				elif pkt.type == 0x08:
+					what = "Whisper"
+				elif pkt.type == 0x09:
+					what = "Yell"
+				elif pkt.type == 0x0a:
+					what = "Spell"
+				elif pkt.type == 0x0d:
+					what = "Guild Chat"
+				elif pkt.type == 0x0e:
+					what = "Alliance Chat"
+				elif pkt.type == 0x0f:
+					what = "Command prompt"
+				else:
+					what = "Unknown message"
+				self.log.info('%s from 0x%X (%s): "%s"', what, pkt.serial, pkt.name, pkt.msg)
+
+			elif isinstance(pkt, net.LoginCompletePacket):
+				assert not self.lc
+				self.lc = True
 
 			elif isinstance(pkt, net.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
 
 			elif isinstance(pkt, net.ControlAnimationPacket):
-				pass
+				self.log.info('Ignoring animation packet')
+
+			elif isinstance(pkt, net.PlaySoundPacket):
+				self.log.info('Ignoring sound packet')
+
+			elif isinstance(pkt, net.SetWeatherPacket):
+				assert self.lc
+				self.log.info('Ignoring weather packet')
 
 			else:
 				self.log.warn("Unhandled packet {}".format(pkt.__class__))

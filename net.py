@@ -377,20 +377,26 @@ class Packet:
 		self.buf = buf
 		self.readCount = 0
 		self.validated = False
-		cmd = self.byte()
+		cmd = self.uchar()
 		if cmd != self.cmd:
 			raise RuntimeError("Invalid data for this packet {} <> {}".format(cmd, self.cmd))
 
 	def pb(self, num):
 		''' Returns the given number of characters from the gibven buffer '''
+		if num > len(self.buf):
+			raise EOFError("Trying to read {} bytes, but only {} left in buffer".format(num, len(self.buf)))
 		self.readCount += num
 		ret = self.buf[:num]
 		self.buf = self.buf[num:]
 		return ret
 
-	def byte(self):
-		''' Returns next byte from the buffer '''
-		return ord(self.pb(1))
+	def uchar(self):
+		''' Returns next unsngned byte from the buffer '''
+		return struct.unpack('B', self.pb(1))[0]
+
+	def schar(self):
+		''' Returns next signed byte from the buffer '''
+		return struct.unpack('b', self.pb(1))[0]
 
 	def ushort(self):
 		''' Returns next unsigned short from the buffer '''
@@ -424,15 +430,15 @@ class ServerListPacket(Packet):
 	def __init__(self, buf):
 		super().__init__(buf)
 		self.length = self.ushort()
-		self.flag = self.byte()
+		self.flag = self.uchar()
 		self.numServers = self.ushort()
 		self.servers = []
 		for i in range(0, self.numServers):
 			self.servers.append({
 				'idx': self.ushort(),
 				'name': self.string(32),
-				'full': self.byte(),
-				'tz': self.byte(),
+				'full': self.uchar(),
+				'tz': self.uchar(),
 				'ip': self.ip(),
 			})
 
@@ -469,18 +475,18 @@ class CharactersPacket(Packet):
 	def __init__(self, buf):
 		super().__init__(buf)
 		self.length = self.ushort()
-		self.numChars = self.byte()
+		self.numChars = self.uchar()
 		self.chars = []
 		for i in range(0, self.numChars):
 			self.chars.append({
 				'name': self.string(30),
 				'pass': self.string(30),
 			})
-		self.numLocs = self.byte()
+		self.numLocs = self.uchar()
 		self.locs = []
 		for i in range(0, self.numLocs):
 			self.locs.append({
-				'idx': self.byte(),
+				'idx': self.uchar(),
 				'name': self.string(31),
 				'area': self.string(31),
 			})
@@ -500,12 +506,12 @@ class CharLocaleBodyPacket(Packet):
 		self.bodyType = self.ushort()
 		self.x = self.ushort()
 		self.y = self.ushort()
-		unk = self.byte() # Unknown
-		self.z = self.byte()
-		self.facing = self.byte()
+		unk = self.uchar() # Unknown
+		self.z = self.schar()
+		self.facing = self.schar()
 		unk = self.uint() # Unknown
 		unk = self.uint() # Unknown
-		unk = self.byte() # Unknown
+		unk = self.schar() # Unknown
 		self.widthM8 = self.ushort()
 		self.height = self.ushort()
 		unk = self.ushort() # Unknown
@@ -564,10 +570,10 @@ class GeneralInfoPacket(Packet):
 			unk = self.ushort()
 
 		elif self.sub == self.SUB_PARTY:
-			raise NotImplementedError()
+			self.data = self.pb(len(self.buf))
 
 		elif self.sub == self.SUB_CURSORMAP:
-			self.cursor = self.byte()
+			self.cursor = self.uchar()
 
 		elif self.sub == self.SUB_STUN:
 			raise NotImplementedError("This should no longer be used")
@@ -602,7 +608,7 @@ class Unk32Packet(Packet):
 
 	def __init__(self, buf):
 		super().__init__(buf)
-		self.byte()
+		self.uchar()
 
 
 class ControlAnimationPacket(Packet):
@@ -613,9 +619,9 @@ class ControlAnimationPacket(Packet):
 
 	def __init__(self, buf):
 		super().__init__(buf)
-		self.byte() # Unknown
-		self.byte() # Unknown
-		self.byte() # Unknown
+		self.uchar() # Unknown
+		self.uchar() # Unknown
+		self.uchar() # Unknown
 
 
 class DrawGamePlayerPacket(Packet):
@@ -628,14 +634,14 @@ class DrawGamePlayerPacket(Packet):
 		super().__init__(buf)
 		self.serial = self.uint()
 		self.graphic = self.ushort()
-		self.byte() # unknown
+		self.uchar() # unknown
 		self.hue = self.ushort()
-		self.flag = self.byte()
+		self.flag = self.uchar()
 		self.x = self.ushort()
 		self.y = self.ushort()
 		self.ushort() # unknown
-		self.facing = self.byte()
-		self.z = self.byte()
+		self.direction = self.schar()
+		self.z = self.schar()
 
 
 class OverallLightLevelPacket(Packet):
@@ -646,7 +652,7 @@ class OverallLightLevelPacket(Packet):
 
 	def __init__(self, buf):
 		super().__init__(buf)
-		self.level = self.byte()
+		self.level = self.uchar()
 
 
 class SendSpeechPacket(Packet):
@@ -659,7 +665,7 @@ class SendSpeechPacket(Packet):
 		self.length = self.ushort()
 		self.serial = self.uint()
 		self.model = self.ushort()
-		self.type = self.byte()
+		self.type = self.uchar()
 		self.color = self.ushort()
 		self.font = self.ushort()
 		self.name = self.string(30)
@@ -685,10 +691,10 @@ class WarModePacket(Packet):
 
 	def __init__(self, buf):
 		super().__init__(buf)
-		self.flag = self.byte()
-		self.byte() # unknown
-		self.byte() # unknown
-		self.byte() # unknown
+		self.war = self.uchar()
+		self.uchar() # unknown
+		self.uchar() # unknown
+		self.uchar() # unknown
 
 
 class LoginCompletePacket(Packet):
@@ -709,9 +715,123 @@ class SetWeatherPacket(Packet):
 
 	def __init__(self, buf):
 		super().__init__(buf)
-		self.type = self.byte()
-		self.num = self.byte()
-		self.temp = self.byte()
+		self.type = self.uchar()
+		self.num = self.uchar()
+		self.temp = self.uchar()
+
+
+class DrawObjectPacket(Packet):
+	''' Draws an object '''
+
+	cmd = 0x78
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.graphic = self.ushort()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.z = self.schar()
+		self.facing = self.schar()
+		self.color = self.ushort()
+		self.flag = self.uchar()
+		self.notoriety = self.uchar()
+		self.equip = []
+		while True:
+			serial = self.uint()
+			if not serial:
+				break
+			graphic = self.ushort()
+			layer = self.uchar()
+			if graphic & 0x8000:
+				color = self.ushort()
+			else:
+				color = None
+			self.equip.append({
+				'serial': serial,
+				'graphic': graphic,
+				'layer': layer,
+				'color': color,
+			})
+		if not len(self.equip):
+			self.uchar() # unused/closing
+
+
+class ObjectInfoPacket(Packet):
+	''' Object Info '''
+
+	cmd = 0x1a
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.graphic = self.ushort()
+		if self.serial & 0x80000000:
+			self.count = self.ushort()
+		else:
+			self.count = None
+		if self.graphic & 0x8000:
+			self.graphic += self.uchar()
+		x = self.ushort()
+		y = self.ushort()
+		if x & 0x8000:
+			self.facing = self.schar()
+		else:
+			self.facing = None
+		self.z = self.schar()
+		if y & 0x8000:
+			self.color = self.ushort()
+		else:
+			self.color = None
+		if y & 0x4000:
+			self.flag = self.uchar()
+		else:
+			self.flag = None
+		self.x = x & 0x7fff
+		self.y = y & 0x3fff
+
+
+class AllowAtackPacket(Packet):
+	''' Allow/Refuse attack '''
+
+	cmd = 0xaa
+	length = 5
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+
+
+class TipWindowPacket(Packet):
+	''' Tip/Notice Window '''
+
+	cmd = 0xa6
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.flag = self.uchar()
+		self.tipid = self.uint()
+		msgSize = self.ushort()
+		self.msg = self.string(msgSize)
+
+
+class PlaySoundPacket(Packet):
+	''' Play Sound Effect '''
+
+	cmd = 0x54
+	length = 12
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.mode = self.uchar()
+		self.model = self.ushort()
+		self.ushort() # unknown
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.z = self.ushort()
 
 
 class Ph:
@@ -735,6 +855,11 @@ class Ph:
 	WAR_MODE                 = WarModePacket.cmd
 	LOGIN_COMPLETE           = LoginCompletePacket.cmd
 	SET_WEATHER              = SetWeatherPacket.cmd
+	DRAW_OBJECT              = DrawObjectPacket.cmd
+	OBJECT_INFO              = ObjectInfoPacket.cmd
+	ALLOW_ATTACK             = AllowAtackPacket.cmd
+	TIP_WINDOW               = TipWindowPacket.cmd
+	PLAY_SOUND               = PlaySoundPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -752,6 +877,11 @@ class Ph:
 		WAR_MODE:                 WarModePacket,
 		LOGIN_COMPLETE:           LoginCompletePacket,
 		SET_WEATHER:              SetWeatherPacket,
+		DRAW_OBJECT:              DrawObjectPacket,
+		OBJECT_INFO:              ObjectInfoPacket,
+		ALLOW_ATTACK:             AllowAtackPacket,
+		TIP_WINDOW:               TipWindowPacket,
+		PLAY_SOUND:               PlaySoundPacket,
 	}
 
 	@staticmethod
@@ -768,10 +898,10 @@ class PacketOut:
 	''' Helper class for outputting a packet '''
 	def __init__(self, cmd):
 		self.buf = b''
-		self.byte(cmd)
+		self.uchar(cmd)
 
-	def byte(self, val):
-		''' Add a byte to the packet '''
+	def uchar(self, val):
+		''' Add an unsigned char (byte) to the packet '''
 		if not isinstance(val, int):
 			raise TypeError("Expected int, got {}".format(type(val)))
 		if val < 0 or val > 255:
@@ -831,4 +961,8 @@ class Util:
 	@staticmethod
 	def varStr(byt):
 		''' Convert bytes into a variable-length string '''
-		return byt.decode('ascii').rstrip('\x00')
+		try:
+			dec = byt.decode('utf8')
+		except UnicodeDecodeError:
+			dec = byt.decode('iso8859-15')
+		return dec.rstrip('\x00')
