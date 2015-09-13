@@ -194,16 +194,16 @@ class Client:
 				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
 					self.cursor = pkt.cursor
 				else:
-					raise RuntimeError("Unhandled subpacket {}".format(pkt.sub))
+					self.log.warn("Unhandled GeneralInfo subpacket {}".format(pkt.sub))
 
 			elif isinstance(pkt, net.Unk32Packet):
-				self.log.warn("Unknown 32 packet received")
+				self.log.warn("Unknown 0x32 packet received")
 
 			elif isinstance(pkt, net.ControlAnimationPacket):
 				pass
 
 			else:
-				raise RuntimeError("Unhandled packet {}".format(pkt.__class__))
+				self.log.warn("Unhandled packet {}".format(pkt.__class__))
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
@@ -240,9 +240,10 @@ if __name__ == '__main__':
 	parser.add_argument('port', type=int, help='Server port')
 	parser.add_argument('user', help='Username')
 	parser.add_argument('pwd', help='Password')
+	parser.add_argument('-v', '--verbose', action='store_true', help='Show debug output')
 	args = parser.parse_args()
 
-	logging.basicConfig(level=logging.INFO)
+	logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
 	c = Client()
 	servers = c.connect(args.ip, args.port, args.user, args.pwd)

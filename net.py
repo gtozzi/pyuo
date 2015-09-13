@@ -291,7 +291,7 @@ class Network:
 
 	def send(self, data):
 		''' Sends a packet, expects raw binary data '''
-		self.log.debug('-> "%s"', data)
+		self.log.debug('-> 0x%0.2X, %d bytes\n"%s"', data[0], len(data), data)
 		self.sock.send(data)
 
 	def recv(self):
@@ -312,11 +312,15 @@ class Network:
 		else:
 			raw = self.buf
 
-		self.log.debug('<- 0x%0.2X %s"%s"', raw[0], 'C' if self.compress else '', raw)
+		if not raw:
+			raise NotImplementedError()
+
+		self.log.debug('<- 0x%0.2X, %d bytes, %s\n"%s"', raw[0], len(raw), 'compressed' if self.compress else 'not compressed', raw)
 
 		pkt = Ph.process(raw)
 		pkt.validate()
 		assert pkt.validated
+		assert pkt.length == len(raw)
 
 		# Remove the processed packet from the buffer the buffer
 		self.buf = self.buf[pkt.length:]
@@ -355,7 +359,7 @@ class Network:
 			# if not, make it an incomplete byte
 			if srcPos == len(buf):
 				if node != 0:
-					return false;
+					return False;
 				else:
 					raise NotImplementedError("Incomplete packet")
 
@@ -631,7 +635,7 @@ class Ph:
 		try:
 			return Ph.HANDLERS[cmd](buf)
 		except KeyError:
-			raise NotImplementedError("Unknown packet 0x%0.2X" % cmd)
+			raise NotImplementedError("Unknown packet 0x%0.2X, %d bytes\n%s" % (cmd, len(buf), buf))
 
 
 class PacketOut:
