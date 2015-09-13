@@ -535,6 +535,8 @@ class GeneralInfoPacket(Packet):
 	SUB_CLOSESTATUS = 0x0c
 	## 3D Action
 	SUB_3DACT = 0x0e
+	## Enable map-diff files
+	SUB_MAPDIFF = 0x18
 
 	cmd = 0xbf
 
@@ -579,6 +581,15 @@ class GeneralInfoPacket(Packet):
 		elif self.sub == self.SUB_3DACT:
 			self.animation = self.uint()
 
+		elif self.sub == self.SUB_MAPDIFF:
+			mapNum = self.uint()
+			self.maps = []
+			for i in range(0, mapNum):
+				self.maps.append({
+					'mpatches': self.uint(),
+					'spatches': self.uint(),
+				})
+
 		else:
 			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
 
@@ -607,30 +618,140 @@ class ControlAnimationPacket(Packet):
 		self.byte() # Unknown
 
 
+class DrawGamePlayerPacket(Packet):
+	''' Draw game player '''
+
+	cmd = 0x20
+	length = 19
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.graphic = self.ushort()
+		self.byte() # unknown
+		self.hue = self.ushort()
+		self.flag = self.byte()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.ushort() # unknown
+		self.facing = self.byte()
+		self.z = self.byte()
+
+
+class OverallLightLevelPacket(Packet):
+	''' Overall Light Level '''
+
+	cmd = 0x4f
+	length = 2
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.level = self.byte()
+
+
+class SendSpeechPacket(Packet):
+	''' Send(Receive) Speech '''
+
+	cmd = 0x1c
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.model = self.ushort()
+		self.type = self.byte()
+		self.color = self.ushort()
+		self.font = self.ushort()
+		self.name = self.string(30)
+		self.msg = self.string(self.length-44)
+
+
+class PlayMidiPacket(Packet):
+	''' Play Midi Music '''
+
+	cmd = 0x6d
+	length = 3
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.music = self.ushort()
+
+
+class WarModePacket(Packet):
+	''' Request/Set war mode '''
+
+	cmd = 0x72
+	length = 5
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.flag = self.byte()
+		self.byte() # unknown
+		self.byte() # unknown
+		self.byte() # unknown
+
+
+class LoginCompletePacket(Packet):
+	''' Login Complete '''
+
+	cmd = 0x55
+	length = 1
+
+	def __init__(self, buf):
+		super().__init__(buf)
+
+
+class SetWeatherPacket(Packet):
+	''' Sets Weather '''
+
+	cmd = 0x65
+	length = 4
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.type = self.byte()
+		self.num = self.byte()
+		self.temp = self.byte()
+
+
 class Ph:
 	''' Packet Handler '''
 
-	SERVER_LIST = ServerListPacket.cmd
-	LOGIN_CHARACTER = 0x5d
-	LOGIN_REQUEST = 0x80
-	CHARACTERS = CharactersPacket.cmd
-	CONNECT_TO_GAME_SERVER = ConnectToGameServerPacket.cmd
-	GAME_SERVER_LOGIN = 0x91
-	ENABLE_FEATURES = EnableFeaturesPacket.cmd
-	CHAR_LOCALE_BODY = CharLocaleBodyPacket.cmd
-	GENERAL_INFO = GeneralInfoPacket.cmd
-	UNKNOWN_32 = Unk32Packet.cmd
-	CONTROL_ANIMATION = ControlAnimationPacket.cmd
+	SERVER_LIST              = ServerListPacket.cmd
+	LOGIN_CHARACTER          = 0x5d
+	LOGIN_REQUEST            = 0x80
+	CHARACTERS               = CharactersPacket.cmd
+	CONNECT_TO_GAME_SERVER   = ConnectToGameServerPacket.cmd
+	GAME_SERVER_LOGIN        = 0x91
+	ENABLE_FEATURES          = EnableFeaturesPacket.cmd
+	CHAR_LOCALE_BODY         = CharLocaleBodyPacket.cmd
+	GENERAL_INFO             = GeneralInfoPacket.cmd
+	UNKNOWN_32               = Unk32Packet.cmd
+	CONTROL_ANIMATION        = ControlAnimationPacket.cmd
+	DRAW_GAME_PLAYER         = DrawGamePlayerPacket.cmd
+	OVERALL_LIGHT_LEVEL      = OverallLightLevelPacket.cmd
+	SEND_SPEECH              = SendSpeechPacket.cmd
+	PLAY_MIDI                = PlayMidiPacket.cmd
+	WAR_MODE                 = WarModePacket.cmd
+	LOGIN_COMPLETE           = LoginCompletePacket.cmd
+	SET_WEATHER              = SetWeatherPacket.cmd
 
 	HANDLERS = {
-		SERVER_LIST: ServerListPacket,
-		CONNECT_TO_GAME_SERVER: ConnectToGameServerPacket,
-		ENABLE_FEATURES: EnableFeaturesPacket,
-		CHARACTERS: CharactersPacket,
-		CHAR_LOCALE_BODY: CharLocaleBodyPacket,
-		GENERAL_INFO: GeneralInfoPacket,
-		UNKNOWN_32: Unk32Packet,
-		CONTROL_ANIMATION: ControlAnimationPacket,
+		SERVER_LIST:              ServerListPacket,
+		CONNECT_TO_GAME_SERVER:   ConnectToGameServerPacket,
+		ENABLE_FEATURES:          EnableFeaturesPacket,
+		CHARACTERS:               CharactersPacket,
+		CHAR_LOCALE_BODY:         CharLocaleBodyPacket,
+		GENERAL_INFO:             GeneralInfoPacket,
+		UNKNOWN_32:               Unk32Packet,
+		CONTROL_ANIMATION:        ControlAnimationPacket,
+		DRAW_GAME_PLAYER:         DrawGamePlayerPacket,
+		OVERALL_LIGHT_LEVEL:      OverallLightLevelPacket,
+		SEND_SPEECH:              SendSpeechPacket,
+		PLAY_MIDI:                PlayMidiPacket,
+		WAR_MODE:                 WarModePacket,
+		LOGIN_COMPLETE:           LoginCompletePacket,
+		SET_WEATHER:              SetWeatherPacket,
 	}
 
 	@staticmethod

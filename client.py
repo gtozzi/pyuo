@@ -194,7 +194,7 @@ class Client:
 				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
 					self.cursor = pkt.cursor
 				else:
-					self.log.warn("Unhandled GeneralInfo subpacket {}".format(pkt.sub))
+					self.log.warn("Unhandled GeneralInfo subpacket 0x{:02X}".format(pkt.sub))
 
 			elif isinstance(pkt, net.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
