@@ -624,6 +624,24 @@ class ControlAnimationPacket(Packet):
 		self.uchar() # Unknown
 
 
+class CharacterAnimationPacket(Packet):
+	''' Play an animation for a character '''
+
+	cmd = 0x6e
+	length = 14
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.action = self.ushort()
+		self.uchar() # unknown
+		self.frames = self.uchar()
+		self.repeat = self.ushort()
+		self.backwards = self.uchar()
+		self.repeat = self.uchar()
+		self.delay = self.uchar()
+
+
 class DrawGamePlayerPacket(Packet):
 	''' Draw game player '''
 
@@ -670,6 +688,24 @@ class SendSpeechPacket(Packet):
 		self.font = self.ushort()
 		self.name = self.string(30)
 		self.msg = self.string(self.length-44)
+
+
+class UnicodeSpeech(Packet):
+	''' Receive an unicode speech '''
+
+	cmd = 0xae
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.model = self.ushort()
+		self.type = self.uchar()
+		self.color = self.ushort()
+		self.font = self.ushort()
+		self.lang = self.ushort()
+		self.name = self.string(30)
+		self.msg = self.string(self.length-48+2)
 
 
 class PlayMidiPacket(Packet):
@@ -721,7 +757,7 @@ class SetWeatherPacket(Packet):
 
 
 class DrawObjectPacket(Packet):
-	''' Draws an object '''
+	''' Draws a mobile '''
 
 	cmd = 0x78
 
@@ -758,8 +794,27 @@ class DrawObjectPacket(Packet):
 			self.uchar() # unused/closing
 
 
+class UpdatePlayerPacket(Packet):
+	''' Updates a mobile '''
+
+	cmd = 0x77
+	length = 17
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.graphic = self.ushort()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.z = self.schar()
+		self.facing = self.schar()
+		self.color = self.ushort()
+		self.flag = self.uchar()
+		self.notoriety = self.uchar()
+
+
 class ObjectInfoPacket(Packet):
-	''' Object Info '''
+	''' Braws an item '''
 
 	cmd = 0x1a
 
@@ -791,6 +846,35 @@ class ObjectInfoPacket(Packet):
 			self.flag = None
 		self.x = x & 0x7fff
 		self.y = y & 0x3fff
+
+
+class AddItemToContainerPacket(Packet):
+	''' TODO: Document this packet '''
+
+	cmd = 0x25
+	length = 0x20
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.graphic = self.ushort()
+		self.offset = self.uchar()
+		self.count = self.ushort()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.container = self.uint()
+		self.color = self.ushort()
+
+
+class DeleteObjectPacket(Packet):
+	''' Object went out of sight '''
+
+	cmd = 0x1d
+	length = 5
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
 
 
 class AllowAtackPacket(Packet):
@@ -834,6 +918,56 @@ class PlaySoundPacket(Packet):
 		self.z = self.ushort()
 
 
+class LoginDeniedPacket(Packet):
+	''' Login Denied '''
+
+	cmd = 0x82
+	length = 2
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.reason = self.uchar()
+
+
+class UpdateVitalPacket(Packet):
+	''' Just an utility base class '''
+
+	length = 9
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.max = self.ushort()
+		self.cur = self.ushort()
+
+
+class UpdateHealthPacket(UpdateVitalPacket):
+	''' Updates current health '''
+
+	cmd = 0xa1
+
+	def __init__(self, buf):
+		super().__init__(buf)
+
+
+class UpdateManaPacket(UpdateVitalPacket):
+	''' Updates current mana '''
+
+	cmd = 0xa2
+
+	def __init__(self, buf):
+		super().__init__(buf)
+
+
+class UpdateStaminaPacket(UpdateVitalPacket):
+	''' Updates current stamina '''
+
+	cmd = 0xa3
+
+	def __init__(self, buf):
+		super().__init__(buf)
+
+
 class Ph:
 	''' Packet Handler '''
 
@@ -848,18 +982,27 @@ class Ph:
 	GENERAL_INFO             = GeneralInfoPacket.cmd
 	UNKNOWN_32               = Unk32Packet.cmd
 	CONTROL_ANIMATION        = ControlAnimationPacket.cmd
+	CHARACTER_ANIMATION      = CharacterAnimationPacket.cmd
 	DRAW_GAME_PLAYER         = DrawGamePlayerPacket.cmd
 	OVERALL_LIGHT_LEVEL      = OverallLightLevelPacket.cmd
 	SEND_SPEECH              = SendSpeechPacket.cmd
+	UNICODE_SPEECH           = UnicodeSpeech.cmd
 	PLAY_MIDI                = PlayMidiPacket.cmd
 	WAR_MODE                 = WarModePacket.cmd
 	LOGIN_COMPLETE           = LoginCompletePacket.cmd
 	SET_WEATHER              = SetWeatherPacket.cmd
 	DRAW_OBJECT              = DrawObjectPacket.cmd
+	UPDATE_PLAYER            = UpdatePlayerPacket.cmd
 	OBJECT_INFO              = ObjectInfoPacket.cmd
+	DELETE_OBJECT            = DeleteObjectPacket.cmd
+	ADD_ITEM_TO_CONTAINER    = AddItemToContainerPacket.cmd
 	ALLOW_ATTACK             = AllowAtackPacket.cmd
 	TIP_WINDOW               = TipWindowPacket.cmd
 	PLAY_SOUND               = PlaySoundPacket.cmd
+	LOGIN_DENIED             = LoginDeniedPacket.cmd
+	UPDATE_HEALTH            = UpdateHealthPacket.cmd
+	UPDATE_MANA              = UpdateManaPacket.cmd
+	UPDATE_STAMINA           = UpdateStaminaPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -870,18 +1013,27 @@ class Ph:
 		GENERAL_INFO:             GeneralInfoPacket,
 		UNKNOWN_32:               Unk32Packet,
 		CONTROL_ANIMATION:        ControlAnimationPacket,
+		CHARACTER_ANIMATION:      CharacterAnimationPacket,
 		DRAW_GAME_PLAYER:         DrawGamePlayerPacket,
 		OVERALL_LIGHT_LEVEL:      OverallLightLevelPacket,
 		SEND_SPEECH:              SendSpeechPacket,
+		UNICODE_SPEECH:           UnicodeSpeech,
 		PLAY_MIDI:                PlayMidiPacket,
 		WAR_MODE:                 WarModePacket,
 		LOGIN_COMPLETE:           LoginCompletePacket,
 		SET_WEATHER:              SetWeatherPacket,
 		DRAW_OBJECT:              DrawObjectPacket,
+		UPDATE_PLAYER:            UpdatePlayerPacket,
 		OBJECT_INFO:              ObjectInfoPacket,
+		DELETE_OBJECT:            DeleteObjectPacket,
+		ADD_ITEM_TO_CONTAINER:    AddItemToContainerPacket,
 		ALLOW_ATTACK:             AllowAtackPacket,
 		TIP_WINDOW:               TipWindowPacket,
 		PLAY_SOUND:               PlaySoundPacket,
+		LOGIN_DENIED:             LoginDeniedPacket,
+		UPDATE_HEALTH:            UpdateHealthPacket,
+		UPDATE_MANA:              UpdateManaPacket,
+		UPDATE_STAMINA:           UpdateStaminaPacket,
 	}
 
 	@staticmethod

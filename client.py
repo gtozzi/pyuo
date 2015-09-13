@@ -65,7 +65,7 @@ class Item(UOBject):
 			self.y = pkt.y
 			self.z = pkt.z
 			self.facing = pkt.facing
-			self.color = pkt.color
+			self.color = pkt.color if pkt.color else 0
 			self.status = pkt.flag
 
 	def __repr__(self):
@@ -99,20 +99,36 @@ class Mobile(UOBject):
 		## 0x6: Murderer (Red)
 		## 0x7: Invulnerable (Yellow)
 		self.notoriety = None
+		## Hit Points
+		self.hp = None
+		## Max Hit Points
+		self.maxhp = None
+		## Mana
+		self.mana = None
+		## Max Mana
+		self.maxmana = None
+		## Stamina
+		self.stam = None
+		## Max Stamina
+		self.maxstam = None
 
 		if pkt is not None:
-			if not isinstance(pkt, net.DrawObjectPacket):
-				raise ValueError("Expecting a DrawObjectPacket")
-			self.serial = pkt.serial
-			self.graphic = pkt.graphic
-			self.x = pkt.x
-			self.y = pkt.y
-			self.z = pkt.z
-			self.facing = pkt.facing
-			self.color = pkt.color
-			self.status = pkt.flag
-			self.notoriety = pkt.notoriety
-			##TODO: handle equip
+			self.update(pkt)
+
+	def update(self, pkt):
+		''' Update from packet '''
+		if not isinstance(pkt, net.UpdatePlayerPacket) and not isinstance(pkt, net.DrawObjectPacket):
+			raise ValueError("Expecting an UpdatePlayerPacket or DrawObjectPacket")
+		self.serial = pkt.serial
+		self.graphic = pkt.graphic
+		self.x = pkt.x
+		self.y = pkt.y
+		self.z = pkt.z
+		self.facing = pkt.facing
+		self.color = pkt.color
+		self.status = pkt.flag
+		self.notoriety = pkt.notoriety
+		##TODO: handle equip if DrawObjectPacket
 
 	def __repr__(self):
 		return "Mobile 0x{serial:02X} graphic 0x{graphic:02X} color 0x{color:02X} at {x},{y},{z} facing {facing}".format(**self.__dict__)
@@ -152,10 +168,8 @@ class Client:
 
 		## Reference to player, character instance
 		self.player = None
-		## Dictionary of mobs around, by serial
-		self.mobs = {}
-		## Dictionary of items around, by serial
-		self.items = {}
+		## Dictionary of Objects (Mobiles and Items) around, by serial
+		self.objects = {}
 
 		## Current Realm's width
 		self.width = None
@@ -245,7 +259,7 @@ class Client:
 	@status('loggedin')
 	def selectCharacter(self, name, idx):
 		''' Login the character with the given name '''
-		self.log.info('selecting character %s', name)
+		self.log.info('selecting character #%d %s', idx, name)
 		po = net.PacketOut(net.Ph.LOGIN_CHARACTER)
 		po.uint(0xedededed) #Pattern1
 		po.string(name, 30) #Char name
@@ -269,7 +283,10 @@ class Client:
 		while True:
 			pkt = self.receive()
 
-			if isinstance(pkt, net.CharLocaleBodyPacket):
+			if isinstance(pkt, net.LoginDeniedPacket):
+				raise LoginDeniedError(pkt.reason)
+
+			elif isinstance(pkt, net.CharLocaleBodyPacket):
 				if self.lc:
 					raise NotImplementedError("Unexpected")
 
@@ -312,17 +329,36 @@ class Client:
 
 			elif isinstance(pkt, net.DrawObjectPacket):
 				assert self.lc
-				mob = Mobile(pkt)
-				assert mob.serial not in self.mobs.keys()
-				self.log.info("New mobile: %s", mob)
-				self.mobs[mob.serial] = mob
+				if pkt.serial in self.objects.keys():
+					self.objects[pkt.serial].update(pkt)
+					self.log.info("Refreshed mobile: %s", self.objects[pkt.serial])
+				else:
+					mob = Mobile(pkt)
+					self.objects[mob.serial] = mob
+					self.log.info("New mobile: %s", mob)
 
 			elif isinstance(pkt, net.ObjectInfoPacket):
 				assert self.lc
 				item = Item(pkt)
-				assert item.serial not in self.items.keys()
+				assert item.serial not in self.objects.keys()
 				self.log.info("New item: %s", item)
-				self.items[item.serial] = item
+				self.objects[item.serial] = item
+
+			elif isinstance(pkt, net.UpdatePlayerPacket):
+				assert self.lc
+				self.objects[pkt.serial].update(pkt)
+				self.log.info("Updated mobile: %s", self.objects[pkt.serial])
+
+			elif isinstance(pkt, net.DeleteObjectPacket):
+				assert self.lc
+				del self.objects[pkt.serial]
+				self.log.info("Object 0x%X went out of sight", pkt.serial)
+
+			elif isinstance(pkt, net.AddItemToContainerPacket):
+				assert self.lc
+				print(self.objects[pkt.serial])
+				print(self.objects[pkt.container])
+				raise NotImplementedError()
 
 			elif isinstance(pkt, net.WarModePacket):
 				assert self.player.war is None
@@ -332,6 +368,42 @@ class Client:
 				assert self.lc
 				self.player.target = pkt.serial
 				self.log.info("Target set to 0x%X", self.player.target)
+
+			elif isinstance(pkt, net.UpdateHealthPacket):
+				assert self.lc
+				if self.player.serial == pkt.serial:
+					self.player.maxhp = pkt.max
+					self.player.hp = pkt.cur
+					self.log.info("My HP: %d/%d", pkt.cur, pkt.max)
+				else:
+					mob = self.objects[pkt.serial]
+					mob.maxhp = pkt.max
+					mob.hp = pkt.cur
+					self.log.info("0x%X's HP: %d/%d", pkt.serial, pkt.cur, pkt.max)
+
+			elif isinstance(pkt, net.UpdateManaPacket):
+				assert self.lc
+				if self.player.serial == pkt.serial:
+					self.player.maxmana = pkt.max
+					self.player.mana = pkt.cur
+					self.log.info("My MANA: %d/%d", pkt.cur, pkt.max)
+				else:
+					mob = self.objects[pkt.serial]
+					mob.maxmana = pkt.max
+					mob.mana = pkt.cur
+					self.log.info("0x%X's MANA: %d/%d", pkt.serial, pkt.cur, pkt.max)
+
+			elif isinstance(pkt, net.UpdateStaminaPacket):
+				assert self.lc
+				if self.player.serial == pkt.serial:
+					self.player.maxstam = pkt.max
+					self.player.stam = pkt.cur
+					self.log.info("My STAM: %d/%d", pkt.cur, pkt.max)
+				else:
+					mob = self.objects[pkt.serial]
+					mob.maxstam = pkt.max
+					mob.stam = pkt.cur
+					self.log.info("0x%X's STAM: %d/%d", pkt.serial, pkt.cur, pkt.max)
 
 			elif isinstance(pkt, net.GeneralInfoPacket):
 				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
@@ -347,7 +419,7 @@ class Client:
 				assert self.lc
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
 
-			elif isinstance(pkt, net.SendSpeechPacket):
+			elif isinstance(pkt, net.SendSpeechPacket) or isinstance(pkt, net.UnicodeSpeech):
 				assert self.lc
 				if pkt.type == 0x00:
 					what = "Say"
@@ -371,7 +443,14 @@ class Client:
 					what = "Command prompt"
 				else:
 					what = "Unknown message"
-				self.log.info('%s from 0x%X (%s): "%s"', what, pkt.serial, pkt.name, pkt.msg)
+
+				p = "u" if isinstance(pkt, net.UnicodeSpeech) else ""
+				self.log.info('%s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
+
+			elif isinstance(pkt, net.CharacterAnimationPacket):
+				assert self.lc
+				# Just check that the object exists
+				self.objects[pkt.serial]
 
 			elif isinstance(pkt, net.LoginCompletePacket):
 				assert not self.lc
@@ -381,14 +460,19 @@ class Client:
 				self.log.warn("Unknown 0x32 packet received")
 
 			elif isinstance(pkt, net.ControlAnimationPacket):
+				assert self.lc
 				self.log.info('Ignoring animation packet')
 
 			elif isinstance(pkt, net.PlaySoundPacket):
+				assert self.lc
 				self.log.info('Ignoring sound packet')
 
 			elif isinstance(pkt, net.SetWeatherPacket):
 				assert self.lc
 				self.log.info('Ignoring weather packet')
+
+			elif isinstance(pkt, net.OverallLightLevelPacket):
+				self.log.info('Ignoring light level packet')
 
 			else:
 				self.log.warn("Unhandled packet {}".format(pkt.__class__))
@@ -403,21 +487,48 @@ class Client:
 		''' Receives next packet from the server
 		@param expect If given, throws an exception if packet type is not the expected one
 		@return Packet
-		@throws UnexpectedPacket
+		@throws UnexpectedPacketError
 		'''
 		pkt = self.net.recv()
 
 		if expect and pkt.cmd != expect:
-			raise UnexpectedPacket("Expecting 0x%0.2X packet, got 0x%0.2X intead" % expect, self.cmd)
+			raise UnexpectedPacketError("Expecting 0x%0.2X packet, got 0x%0.2X intead" % expect, self.cmd)
 
 		return pkt
+
 
 
 class StatusError(Exception):
 	pass
 
-class UnexpectedPacket(Exception):
+
+class UnexpectedPacketError(Exception):
 	pass
+
+
+class LoginDeniedError(Exception):
+
+	def __init__(self, code):
+		self.code = code
+		if code == 0x00:
+			mex = "Uncorrect name or password"
+		elif code == 0x01:
+			mex = "Someone is already using this account"
+		elif code == 0x02:
+			mex = "Your account has been blocked"
+		elif code == 0x03:
+			mex = "Your account credentials are invalid"
+		elif code == 0x04:
+			mex = "Communication problem"
+		elif code == 0x05:
+			mex = "The IGR concurrency limit has been met"
+		elif code == 0x06:
+			mex = "The IGR time limit has been met"
+		elif code == 0x07:
+			mex = "General IGR authentication failure"
+		else:
+			mex = "Unknown reason {:02X}".format(code)
+		super().__init__(mex)
 
 
 if __name__ == '__main__':
@@ -428,6 +539,8 @@ if __name__ == '__main__':
 	parser.add_argument('port', type=int, help='Server port')
 	parser.add_argument('user', help='Username')
 	parser.add_argument('pwd', help='Password')
+	parser.add_argument('charidx', type=int, help="Character's Index")
+	parser.add_argument('charname', help="Character's Name")
 	parser.add_argument('-v', '--verbose', action='store_true', help='Show debug output')
 	args = parser.parse_args()
 
@@ -436,6 +549,6 @@ if __name__ == '__main__':
 	c = Client()
 	servers = c.connect(args.ip, args.port, args.user, args.pwd)
 	chars = c.selectServer(3)
-	c.selectCharacter('Developer Bodom', 1)
+	c.selectCharacter(args.charname, args.charidx)
 	c.play()
 	print('done')
