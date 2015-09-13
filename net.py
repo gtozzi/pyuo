@@ -298,14 +298,11 @@ class Network:
 		''' Reads next packet from the server, waits until a full packet is received '''
 
 		# Wait for a full packet
-		wait = None
-		while len(self.buf) < 1:
-			if wait:
-				self.log.info("Waiting for a packet...")
-				wait = False
-			self.buf += self.sock.recv(4096)
-			if wait is None:
-				wait = True
+		if len(self.buf) < 1:
+			data = self.sock.recv(4096)
+			if not len(data):
+				raise RuntimeError("Disconnected");
+			self.buf += data
 
 		if self.compress:
 			raw, size = self.decompress(self.buf)
@@ -465,6 +462,17 @@ class ConnectToGameServerPacket(Packet):
 		self.ip = self.ip()
 		self.port = self.ushort()
 		self.key = self.uint()
+
+
+class PingPacket(Packet):
+	''' Ping request/reply '''
+
+	cmd = 0x73
+	length = 2
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.seq = self.uchar()
 
 
 class CharactersPacket(Packet):
@@ -640,6 +648,31 @@ class CharacterAnimationPacket(Packet):
 		self.backwards = self.uchar()
 		self.repeat = self.uchar()
 		self.delay = self.uchar()
+
+
+class GraphicalEffectPacket(Packet):
+	''' Play a generic graphical effect '''
+
+	cmd = 0x70
+	length = 28
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.direction = self.uchar()
+		self.serial = self.uint()
+		self.target = self.uint()
+		self.graphic = self.ushort()
+		self.x = self.ushort()
+		self.y = self.ushort()
+		self.z = self.schar()
+		self.tx = self.ushort()
+		self.ty = self.ushort()
+		self.tz = self.schar()
+		self.speed = self.uchar()
+		self.duration = self.uchar()
+		self.ushort() # Unknown
+		self.adjust = self.uchar()
+		self.explode = self.uchar()
 
 
 class DrawGamePlayerPacket(Packet):
@@ -977,12 +1010,14 @@ class Ph:
 	CHARACTERS               = CharactersPacket.cmd
 	CONNECT_TO_GAME_SERVER   = ConnectToGameServerPacket.cmd
 	GAME_SERVER_LOGIN        = 0x91
+	PING                     = PingPacket.cmd
 	ENABLE_FEATURES          = EnableFeaturesPacket.cmd
 	CHAR_LOCALE_BODY         = CharLocaleBodyPacket.cmd
 	GENERAL_INFO             = GeneralInfoPacket.cmd
 	UNKNOWN_32               = Unk32Packet.cmd
 	CONTROL_ANIMATION        = ControlAnimationPacket.cmd
 	CHARACTER_ANIMATION      = CharacterAnimationPacket.cmd
+	GRAPHICAL_EFFECT         = GraphicalEffectPacket.cmd
 	DRAW_GAME_PLAYER         = DrawGamePlayerPacket.cmd
 	OVERALL_LIGHT_LEVEL      = OverallLightLevelPacket.cmd
 	SEND_SPEECH              = SendSpeechPacket.cmd
@@ -1007,6 +1042,7 @@ class Ph:
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
 		CONNECT_TO_GAME_SERVER:   ConnectToGameServerPacket,
+		PING:                     PingPacket,
 		ENABLE_FEATURES:          EnableFeaturesPacket,
 		CHARACTERS:               CharactersPacket,
 		CHAR_LOCALE_BODY:         CharLocaleBodyPacket,
@@ -1014,6 +1050,7 @@ class Ph:
 		UNKNOWN_32:               Unk32Packet,
 		CONTROL_ANIMATION:        ControlAnimationPacket,
 		CHARACTER_ANIMATION:      CharacterAnimationPacket,
+		GRAPHICAL_EFFECT:         GraphicalEffectPacket,
 		DRAW_GAME_PLAYER:         DrawGamePlayerPacket,
 		OVERALL_LIGHT_LEVEL:      OverallLightLevelPacket,
 		SEND_SPEECH:              SendSpeechPacket,

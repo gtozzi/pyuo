@@ -8,6 +8,7 @@ import struct
 import logging
 import ipaddress
 import net
+import time
 
 
 class status:
@@ -147,6 +148,9 @@ class Player(Mobile):
 class Client:
 	''' The main client instance '''
 
+	## Minimum interval between two pings
+	PING_INTERVAL = 30
+
 	def __init__(self):
 		## Dict info about last server connected to {ip, port, user, pass}
 		self.server = None
@@ -157,6 +161,8 @@ class Client:
 		self.status = 'disconnected'
 		## Login complete, will be false during the initial fase of the game
 		self.lc = False
+		## When to send next ping
+		self.ping = 0
 		## Logger, for internal usage
 		self.log = logging.getLogger('client')
 		## Features sent with 0xb9 packet
@@ -280,11 +286,24 @@ class Client:
 	@status('game')
 	def play(self):
 		''' Starts the endless game loop '''
+		self.ping = time.time() + self.PING_INTERVAL
+
 		while True:
 			pkt = self.receive()
 
+			# Send ping if needed
+			if self.lc and self.ping < time.time():
+				po = net.PacketOut(net.Ph.PING)
+				po.uchar(0x00)
+				self.send(po)
+				self.ping = time.time() + self.PING_INTERVAL
+
+			# Process packet
 			if isinstance(pkt, net.LoginDeniedPacket):
 				raise LoginDeniedError(pkt.reason)
+
+			elif isinstance(pkt, net.PingPacket):
+				self.log.debug("Server sent a ping back")
 
 			elif isinstance(pkt, net.CharLocaleBodyPacket):
 				if self.lc:
@@ -462,6 +481,10 @@ class Client:
 			elif isinstance(pkt, net.ControlAnimationPacket):
 				assert self.lc
 				self.log.info('Ignoring animation packet')
+
+			elif isinstance(pkt, net.GraphicalEffectPacket):
+				assert self.lc
+				self.log.info('Graphical effect packet')
 
 			elif isinstance(pkt, net.PlaySoundPacket):
 				assert self.lc
