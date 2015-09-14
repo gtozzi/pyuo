@@ -61,16 +61,6 @@ class UOBject:
 		## Facing
 		self.facing = None
 
-	def waitFor(self, cond):
-		''' Utility internal function, waits until a condition is satisfied '''
-		wait = 0.0
-		while not cond():
-			time.sleep(0.01)
-			wait += 0.01
-			if wait > 5:
-				self.log.warn("Waiting for {}...".format(traceback.extract_stack(limit=2)[0]))
-				wait = 0
-
 
 class Item(UOBject):
 	''' Represents an item in the world '''
@@ -104,6 +94,10 @@ class Item(UOBject):
 		''' Upgrade this item to a container '''
 		self.__class__ = Container
 		self.upgrade()
+
+	def use(self):
+		''' Uses the given item '''
+		self.client.doubleClick(self)
 
 	def __repr__(self):
 		serial = hex(self.serial)
@@ -271,7 +265,7 @@ class Mobile(UOBject):
 
 	def getEquipByLayer(self, layer):
 		''' Returns item equipped in the given layer '''
-		self.waitFor(lambda: self.equip is not None)
+		self.client.waitFor(lambda: self.equip is not None)
 		return self.equip[layer]
 
 	def __repr__(self):
@@ -292,9 +286,47 @@ class Player(Mobile):
 		bp = self.getEquipByLayer(self.LAYER_PACK)
 		if not isinstance(bp, Container):
 			self.client.doubleClick(bp)
-			self.waitFor(lambda: isinstance(bp, Container))
-			self.waitFor(lambda: bp.content is not None)
+			self.client.waitFor(lambda: isinstance(bp, Container))
+			self.client.waitFor(lambda: bp.content is not None)
 		return bp
+
+
+class Target:
+	''' Represents an active target '''
+
+	# Constants for what
+	OBJECT = 0
+	LOCATION = 1
+
+	# Constants for type
+	NEUTRAL = 0
+	HARMFUL = 1
+	HELPFUL = 2
+
+	def __init__(self, client, pkt):
+		assert isinstance(pkt, net.TargetCursorPacket)
+
+		self.client = client
+
+		self.what = pkt.what
+		self.id = pkt.id
+		self.type = pkt.type
+
+	def target(self, obj):
+		''' Sends a target for the given object '''
+		assert self.what == self.OBJECT
+		po = net.PacketOut(net.Ph.TARGET_CURSOR)
+		po.uchar(self.what)
+		po.uint(self.id)
+		po.uchar(self.type)
+		po.uint(obj.serial) # Object
+		po.ushort(0) # X
+		po.ushort(0) # Y
+		po.uchar(0) # unknown
+		po.schar(0) # Z
+		po.ushort(0) # graphic
+		self.client.target = None
+		self.client.send(po)
 
 
 class Client:
@@ -332,6 +364,8 @@ class Client:
 		self.player = None
 		## Dictionary of Objects (Mobiles and Items) around, by serial
 		self.objects = {}
+		## Reference to current active target, if any
+		self.target = None
 
 		## Current Realm's width
 		self.width = None
@@ -664,6 +698,10 @@ class Client:
 				p = "u" if isinstance(pkt, net.UnicodeSpeech) else ""
 				self.log.info('%s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
 
+			elif isinstance(pkt, net.TargetCursorPacket):
+				assert self.target is None
+				self.target = Target(self, pkt)
+
 			elif isinstance(pkt, net.CharacterAnimationPacket):
 				assert self.lc
 				# Just check that the object exists
@@ -788,6 +826,32 @@ class Client:
 		po.string(self.LANG, 4)
 		po.string(text, len(text)*2 + 1, True)
 		self.send(po)
+
+	@logincomplete
+	def waitForTarget(self, timeout=None):
+		''' Waits until a target cursor is requested and return it. If timeout is given, returns after timeout
+		@param timeout float: Timeout, in seconds
+		@return Target on success, None on timeout
+		'''
+		self.waitFor(lambda: self.target is not None, timeout)
+		return self.target
+
+	def waitFor(self, cond, timeout=None):
+		''' Utility function, waits until a condition is satisfied or until timeout expires
+		@return True when consition succeeds, False on timeout
+		'''
+		wait = 0.0
+		nextWarn = 5.0
+		while not cond():
+			time.sleep(0.01)
+			wait += 0.01
+			if timeout:
+				if wait >= timeout:
+					return False
+			elif wait >= nextWarn:
+				self.log.warn("Waiting for {}...".format(traceback.extract_stack(limit=2)[0]))
+				nextWarn = wait + 5.0
+		return True
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''

@@ -15,19 +15,28 @@ class MyBrain(brain.Brain):
 
 	CLEAN_BANDAGES = 0x0e21
 
-	CHUCK_INTERVAL = 30
+	CHUCK_INTERVAL = 60
 
 	def init(self):
 		self.nextChuck = time.time() + self.CHUCK_INTERVAL
+		self.nextHeal = 0
 		self.client.say("Hello, world!")
 
-	def loop(self):
-		# Heal myself
-		bp = self.player.openBackPack()
-		for item in bp:
-			if item.graphic == self.CLEAN_BANDAGES:
-				print(item)
+	def onHpChange(self, old, new):
+		if self.player.hp < self.player.maxhp - 10 and time.time() > self.nextHeal:
+			# Heal myself
+			bp = self.player.openBackPack()
+			for item in bp:
+				if item.graphic == self.CLEAN_BANDAGES:
+					print("Using bandages")
+					item.use()
+					tgt = self.client.waitForTarget(timeout=10)
+					if tgt:
+						self.nextHeal = time.time() + 10
+						tgt.target(self.player)
 
+	def loop(self):
+		# Say a Chuck Norris Fact
 		if time.time() > self.nextChuck:
 			try:
 				conn = http.client.HTTPConnection('api.icndb.com', timeout=5)
@@ -42,7 +51,7 @@ class MyBrain(brain.Brain):
 
 if __name__ == '__main__':
 	# Configure debug output
-	#logging.basicConfig(level=logging.INFO)
+	logging.basicConfig(level=logging.INFO)
 
 	# Read configuration
 	conf = configparser.ConfigParser()

@@ -1165,6 +1165,29 @@ class SendGumpDialogPacket(Packet):
 			self.texts.append(self.string(tlen*2))
 
 
+class TargetCursorPacket(Packet):
+	''' Requesting/Answering a target '''
+
+	cmd = 0x6c
+	length = 19
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		## 0 = object, 1 = location
+		self.what = self.uchar()
+		self.id = self.uint()
+		## 0 = Neutral, 1 = Harmful, 2 = Helpful, 3 = Cancel (server sent)
+		self.type = self.uchar()
+
+		# Following data ignored when sent my server
+		self.uint() # Clicked on
+		self.ushort() # x
+		self.ushort() # y
+		self.uchar() # unknown
+		self.schar() # z
+		self.ushort() # graphic (if static tile)
+
+
 class Ph:
 	''' Packet Handler '''
 
@@ -1213,6 +1236,7 @@ class Ph:
 	STATUS_BAR_INFO          = StatusBarInfoPacket.cmd
 	SEND_SKILL               = SendSkillsPacket.cmd
 	SEND_GUMP                = SendGumpDialogPacket.cmd
+	TARGET_CURSOR            = TargetCursorPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -1252,6 +1276,7 @@ class Ph:
 		STATUS_BAR_INFO:          StatusBarInfoPacket,
 		SEND_SKILL:               SendSkillsPacket,
 		SEND_GUMP:                SendGumpDialogPacket,
+		TARGET_CURSOR:            TargetCursorPacket,
 	}
 
 	@staticmethod
@@ -1283,7 +1308,15 @@ class PacketOut:
 			raise TypeError("Expected int, got {}".format(type(val)))
 		if val < 0 or val > 255:
 			raise ValueError("Byte {} out of range".format(val))
-		self.buf += bytes((val, ))
+		self.buf += struct.pack('B', val)
+
+	def schar(self, val):
+		''' Add a signed char (byte) to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 255:
+			raise ValueError("Byte {} out of range".format(val))
+		self.buf += struct.pack('b', val)
 
 	def ushort(self, val):
 		''' Adds an unsigned short to the packet '''
