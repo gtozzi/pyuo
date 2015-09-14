@@ -8,6 +8,7 @@ import struct
 import logging
 import ipaddress
 import time
+import traceback
 
 from . import net
 from . import brain
@@ -39,7 +40,12 @@ def logincomplete(f):
 class UOBject:
 	''' Base class for an UO Object '''
 
-	def __init__(self):
+	def __init__(self, client):
+		## Logging instance
+		self.log = logging.getLogger(self.__class__.__name__)
+		## Client reference
+		self.client = client
+		
 		## Unique serial number
 		self.serial = None
 		## Graphic ID
@@ -55,40 +61,144 @@ class UOBject:
 		## Facing
 		self.facing = None
 
+	def waitFor(self, cond):
+		''' Utility internal function, waits until a condition is satisfied '''
+		wait = 0.0
+		while not cond():
+			time.sleep(0.01)
+			wait += 0.01
+			if wait > 5:
+				self.log.warn("Waiting for {}...".format(traceback.extract_stack(limit=2)[0]))
+				wait = 0
+
 
 class Item(UOBject):
 	''' Represents an item in the world '''
 
-	def __init__(self, pkt=None):
-		super().__init__()
+	def __init__(self, client, pkt=None):
+		super().__init__(client)
 
 		## Number of items in the stack
-		self.amount = None
+		self.amount = 1
 		## Status flags
 		self.status = None
 
 		if pkt is not None:
-			if not isinstance(pkt, net.ObjectInfoPacket):
-				raise ValueError("Expecting a DrawObjectPacket")
-			self.serial = pkt.serial
-			self.graphic = pkt.graphic
-			self.amount = pkt.count
-			self.x = pkt.x
-			self.y = pkt.y
-			self.z = pkt.z
-			self.facing = pkt.facing
-			self.color = pkt.color if pkt.color else 0
-			self.status = pkt.flag
+			self.update(pkt)
+
+	def update(self, pkt):
+		''' Update from packet '''
+		if not isinstance(pkt, net.ObjectInfoPacket):
+			raise ValueError("Expecting a DrawObjectPacket")
+		self.serial = pkt.serial
+		self.graphic = pkt.graphic
+		self.amount = pkt.count
+		self.x = pkt.x
+		self.y = pkt.y
+		self.z = pkt.z
+		self.facing = pkt.facing
+		self.color = pkt.color if pkt.color else 0
+		self.status = pkt.flag
+
+	def upgradeToContainer(self):
+		''' Upgrade this item to a container '''
+		self.__class__ = Container
+		self.upgrade()
 
 	def __repr__(self):
-		return "{amount}x Item 0x{serial:02X} graphic 0x{graphic:02X} color 0x{color:02X} at {x},{y},{z} facing {facing}".format(**self.__dict__)
+		serial = hex(self.serial)
+		graphic = hex(self.graphic)
+		color = hex(self.color)
+		return "{} Item {} graphic {} color {} at {},{},{} facing {}".format(
+				self.amount, serial, graphic, color, self.x, self.y, self.z, self.facing )
+
+
+class Container(Item):
+	''' A special representation of item '''
+
+	def __init__(self, client):
+		super().__init__(client)
+		self.upgrade()
+
+	def upgrade(self):
+		''' Called when an Item's class has just been changed to container '''
+
+		## The Content, none if still not received
+		self.content = None
+
+	def addItem(self, pkt):
+		''' Adds an item to container, from packet or dictionary '''
+		if type(pkt) == dict:
+			it = pkt
+		elif isinstance(pkt, net.AddItemToContainerPacket):
+			it = pkt.__dict__
+		else:
+			raise ValueError("Expecting a AddItem(s)ToContainerPacket")
+
+		if it['serial'] in self.client.objects.keys():
+			item = self.client.objects[it['serial']]
+		else:
+			item = Item(self.client)
+			item.serial = it['serial']
+			self.client.objects[it['serial']] = item
+		item.graphic = it['graphic']
+		item.amount = it['amount']
+		item.x = it['x']
+		item.y = it['y']
+		item.color = it['color']
+
+		if self.content is None:
+			self.content = []
+		self.content.append(item)
+
+	def __iter__(self):
+		return self.content.__iter__()
+
+	def __next__(self):
+		return self.content.__next__()
+
+	def __getitem__(self, key):
+		return self.content[key]
 
 
 class Mobile(UOBject):
 	''' Represents a mobile in the world '''
 
-	def __init__(self, pkt=None):
-		super().__init__()
+	# Constants for equipment layers
+	LAYER_NONE        = 0x00 #  0. Not used?
+	LAYER_HAND1       = 0x01 #  1. One handed weapon.
+	LAYER_HAND2       = 0x02 #  2. Two handed weapon, shield or misc.
+	LAYER_SHOES       = 0x03 #  3. Shoes.
+	LAYER_PANTS       = 0x04 #  4. Pants.
+	LAYER_SHIRT       = 0x05 #  5. Shirt.
+	LAYER_HELM        = 0x06 #  6. Helm or Hat.
+	LAYER_GLOVES      = 0x07 #  7. Gloves.
+	LAYER_RING        = 0x08 #  8. Ring.
+	LAYER_TALISMAN    = 0x09 #  9. Talisman. (since POL097, Mondain's Legacy)
+	LAYER_NECK        = 0x0a # 10. Neck.
+	LAYER_HAIR        = 0x0b # 11. Hair
+	LAYER_WAIST       = 0x0c # 12. Waist (half apron).
+	LAYER_CHEST       = 0x0d # 13. Torso (inner) (chest armor).
+	LAYER_WRIST       = 0x0e # 14. Bracelet.
+	LAYER_PACK2       = 0x0f # 15. Unused (backpack, but ord. bp is 0x15).
+	LAYER_BEARD       = 0x10 # 16. Facial hair.
+	LAYER_TUNIC       = 0x11 # 17. Torso (middle) (tunic, sash etc.).
+	LAYER_EARS        = 0x12 # 18. Earrings.
+	LAYER_ARMS        = 0x13 # 19. Arms.
+	LAYER_CAPE        = 0x14 # 20. Back (cloak). (Also Quivers in Mondain's Legacy)
+	LAYER_PACK        = 0x15 # 21. Backpack
+	LAYER_ROBE        = 0x16 # 22. Torso (outer) (robe)
+	LAYER_SKIRT       = 0x17 # 23. Legs (outer) (skirt/robe).
+	LAYER_LEGS        = 0x18 # 24. Legs (inner) (leg armor).
+	LAYER_MOUNT       = 0x19 # 25. Mount (horse, ostard etc.).
+	LAYER_VENDORSTOCK = 0x1a # 26. This vendor will sell and restock.
+	LAYER_VENDOREXTRA = 0x1b # 27. This vendor will resell to players but not restock.
+	LAYER_VENDORBUY   = 0x1c # 28. This vendor can buy from players but does not stock.
+	LAYER_BANKBOX     = 0x1d # 29. Contents of bankbox
+	LAYER_TRADE       = 0x1e # 30. Can be multiple of these, do not use directly.
+
+	def __init__(self, client, pkt=None):
+		super().__init__(client)
 
 		## Status flags
 		## 0x00: Normal
@@ -123,6 +233,8 @@ class Mobile(UOBject):
 		self.stam = None
 		## Max Stamina
 		self.maxstam = None
+		## Equip serials list, by layer (None = unknown)
+		self.equip = None
 
 		if pkt is not None:
 			self.update(pkt)
@@ -140,7 +252,27 @@ class Mobile(UOBject):
 		self.color = pkt.color
 		self.status = pkt.flag
 		self.notoriety = pkt.notoriety
-		##TODO: handle equip if DrawObjectPacket
+
+		# Handle equip
+		if isinstance(pkt, net.DrawObjectPacket):
+			self.equip = {}
+			for eq in pkt.equip:
+				serial = eq['serial']
+				if serial in self.client.objects.keys():
+					item = self.client.objects[serial]
+				else:
+					item = Item(self.client)
+					item.serial = eq['serial']
+					self.client.objects[item.serial] = item
+				item.graphic = eq['graphic']
+				item.color = eq['color']
+
+				self.equip[eq['layer']] = item
+
+	def getEquipByLayer(self, layer):
+		''' Returns item equipped in the given layer '''
+		self.waitFor(lambda: self.equip is not None)
+		return self.equip[layer]
 
 	def __repr__(self):
 		return "Mobile 0x{serial:02X} graphic 0x{graphic:02X} color 0x{color:02X} at {x},{y},{z} facing {facing}".format(**self.__dict__)
@@ -149,11 +281,20 @@ class Mobile(UOBject):
 class Player(Mobile):
 	''' Represents the current player '''
 
-	def __init__(self):
-		super().__init__()
+	def __init__(self, client):
+		super().__init__(client)
 
 		## Current target serial
 		self.target = None
+
+	def openBackPack(self):
+		''' Opens player's backpack, waits for it to be loaded '''
+		bp = self.getEquipByLayer(self.LAYER_PACK)
+		if not isinstance(bp, Container):
+			self.client.doubleClick(bp)
+			self.waitFor(lambda: isinstance(bp, Container))
+			self.waitFor(lambda: bp.content is not None)
+		return bp
 
 
 class Client:
@@ -331,11 +472,10 @@ class Client:
 				self.log.debug("Server sent a ping back")
 
 			elif isinstance(pkt, net.CharLocaleBodyPacket):
-				if self.lc:
-					raise NotImplementedError("Unexpected")
+				assert not self.lc
 
 				assert self.player is None
-				self.player = Player()
+				self.player = Player(self)
 
 				assert self.player.serial is None
 				self.player.serial = pkt.serial
@@ -353,6 +493,9 @@ class Client:
 				self.width = pkt.widthM8 + 8
 				assert self.height is None
 				self.height = pkt.height
+
+				assert self.player.serial not in self.objects.keys()
+				self.objects[self.player.serial] = self.player
 
 				self.log.info("Realm size: %d,%d", self.width, self.height)
 				self.log.info("You are 0x%X and your graphic is 0x%X", self.player.serial, self.player.graphic)
@@ -377,7 +520,7 @@ class Client:
 					self.objects[pkt.serial].update(pkt)
 					self.log.info("Refreshed mobile: %s", self.objects[pkt.serial])
 				else:
-					mob = Mobile(pkt)
+					mob = Mobile(self, pkt)
 					self.objects[mob.serial] = mob
 					self.log.info("New mobile: %s", mob)
 					# Auto single click for new mobiles
@@ -385,10 +528,13 @@ class Client:
 
 			elif isinstance(pkt, net.ObjectInfoPacket):
 				assert self.lc
-				item = Item(pkt)
-				assert item.serial not in self.objects.keys()
-				self.log.info("New item: %s", item)
-				self.objects[item.serial] = item
+				if pkt.serial in self.objects.keys():
+					self.objects[pkt.serial].update(pkt)
+					self.log.info("Refresh item: %s", self.objects[pkt.serial])
+				else:
+					item = Item(self, pkt)
+					self.log.info("New item: %s", item)
+					self.objects[item.serial] = item
 
 			elif isinstance(pkt, net.UpdatePlayerPacket):
 				assert self.lc
@@ -397,14 +543,26 @@ class Client:
 
 			elif isinstance(pkt, net.DeleteObjectPacket):
 				assert self.lc
-				del self.objects[pkt.serial]
-				self.log.info("Object 0x%X went out of sight", pkt.serial)
+				if pkt.serial in self.objects:
+					del self.objects[pkt.serial]
+					self.log.info("Object 0x%X went out of sight", pkt.serial)
+				else:
+					self.log.warn("Server requested to delete 0x%X but i don't know it", pkt.serial)
 
 			elif isinstance(pkt, net.AddItemToContainerPacket):
 				assert self.lc
-				print(self.objects[pkt.serial])
-				print(self.objects[pkt.container])
-				raise NotImplementedError()
+				if isinstance(self.objects[pkt.container], Container):
+					self.objects[pkt.container].addItem(pkt)
+				else:
+					self.log.warn("Ignoring add item 0x%X to non-container 0x%X", pkt.serial, pkt.container)
+
+			elif isinstance(pkt, net.AddItemsToContainerPacket):
+				assert self.lc
+				for it in pkt.items:
+					if isinstance(self.objects[it['container']], Container):
+						self.objects[it['container']].addItem(it)
+					else:
+						self.log.warn("Ignoring add item 0x%X to non-container 0x%X", it['serial'], it['container'])
 
 			elif isinstance(pkt, net.WarModePacket):
 				assert self.player.war is None
@@ -467,6 +625,13 @@ class Client:
 				else:
 					self.log.warn("Unhandled GeneralInfo subpacket 0x%X", pkt.sub)
 
+			elif isinstance(pkt, net.DrawContainerPacket):
+				cont = self.objects[pkt.serial]
+				assert isinstance(cont, Item)
+				if not isinstance(cont, Container):
+					# Upgrade the item to a Container
+					cont.upgradeToContainer()
+
 			elif isinstance(pkt, net.TipWindowPacket):
 				assert self.lc
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
@@ -506,6 +671,7 @@ class Client:
 
 			elif isinstance(pkt, net.LoginCompletePacket):
 				assert not self.lc
+				assert self.player is not None
 				self.lc = True
 				# Send some initial info packets      ..
 				self.requestSkills()
@@ -516,10 +682,8 @@ class Client:
 				# Original client also sends this now, seems to also send it again later
 				# 34 ed ed ed ed 04 00 45 dd f5 - Get Player status something
 				self.sendLanguage()
-				# General info (0xbf) subcommand 0x05 is not sent. Should I?
-				# Request tip/notice (0xa7) is not sent. Should I?
-				# General info (0xbf) subcommand 0x09 (lang?) is not sent. Should I?
-				
+				self.singleClick(self.player)
+
 				# Start the brain
 				script.start(self)
 
@@ -544,6 +708,9 @@ class Client:
 
 			elif isinstance(pkt, net.OverallLightLevelPacket):
 				self.log.info('Ignoring light level packet')
+
+			elif isinstance(pkt, net.SeasonInfoPacket):
+				self.log.info('Ignoring season packet')
 
 			else:
 				self.log.warn("Unhandled packet {}".format(pkt.__class__))
@@ -593,9 +760,16 @@ class Client:
 
 	@logincomplete
 	def singleClick(self, obj):
-		''' Sends a single click for the given object (Item/Mobile) to server '''
+		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
 		po = net.PacketOut(net.Ph.SINGLE_CLICK)
-		po.uint(obj.serial)
+		po.uint(obj if type(obj) == int else obj.serial)
+		self.send(po)
+
+	@logincomplete
+	def doubleClick(self, obj):
+		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
+		po = net.PacketOut(net.Ph.DOUBLE_CLICK)
+		po.uint(obj if type(obj) == int else obj.serial)
 		self.send(po)
 
 	@logincomplete

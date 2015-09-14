@@ -818,7 +818,7 @@ class DrawObjectPacket(Packet):
 			if graphic & 0x8000:
 				color = self.ushort()
 			else:
-				color = None
+				color = 0
 			self.equip.append({
 				'serial': serial,
 				'graphic': graphic,
@@ -884,21 +884,44 @@ class ObjectInfoPacket(Packet):
 
 
 class AddItemToContainerPacket(Packet):
-	''' TODO: Document this packet '''
+	''' Adds a single item to a container '''
 
 	cmd = 0x25
-	length = 0x20
+	length = 20
 
 	def __init__(self, buf):
 		super().__init__(buf)
 		self.serial = self.uint()
 		self.graphic = self.ushort()
 		self.offset = self.uchar()
-		self.count = self.ushort()
+		self.amount = self.ushort()
 		self.x = self.ushort()
 		self.y = self.ushort()
 		self.container = self.uint()
 		self.color = self.ushort()
+
+
+class AddItemsToContainerPacket(Packet):
+	''' Adds multiple items to a container '''
+
+	cmd = 0x3c
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		itemNum = self.ushort()
+		self.items = []
+		for i in range(0, itemNum):
+			self.items.append({
+				'serial': self.uint(),
+				'graphic': self.ushort(),
+				'unknown': self.uchar(),
+				'amount': self.ushort(),
+				'x': self.ushort(),
+				'y': self.ushort(),
+				'container': self.uint(),
+				'color': self.ushort(),
+			})
 
 
 class DeleteObjectPacket(Packet):
@@ -910,6 +933,18 @@ class DeleteObjectPacket(Packet):
 	def __init__(self, buf):
 		super().__init__(buf)
 		self.serial = self.uint()
+
+
+class DrawContainerPacket(Packet):
+	''' Draws a container's gump '''
+
+	cmd = 0x24
+	length = 7
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.gump = self.ushort()
 
 
 class AllowAtackPacket(Packet):
@@ -1003,6 +1038,75 @@ class UpdateStaminaPacket(UpdateVitalPacket):
 		super().__init__(buf)
 
 
+class StatusBarInfoPacket(Packet):
+	''' Sends status bar info '''
+
+	cmd = 0x11
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.name = self.string(30)
+		self.hp = self.ushort()
+		self.maxhp = self.ushort()
+		self.canrename = self.uchar()
+		flag = self.uchar()
+		## Sex and race: 0 = Human Male, 1 = Human female, 2 = Elf Male, 3 = Elf Female
+		self.gener = self.uchar()
+		self.str = self.ushort()
+		self.dex = self.ushort()
+		self.int = self.ushort()
+		self.stam = self.ushort()
+		self.maxstam = self.ushort()
+		self.mana = self.ushort()
+		self.maxmana = self.ushort()
+		self.gold = self.uint()
+		self.ar = self.ushort()
+		self.weight = self.ushort()
+		if flag >= 5:
+			self.maxweight = self.ushort()
+			## Race: 1 = Human, 2 = Elf, 3 = Gargoyle
+			self.race = self.uchar()
+		if flag >= 3:
+			self.statcap = self.ushort()
+			self.followers = self.uchar()
+			self.maxfollowers = self.uchar()
+		if flag >= 4:
+			self.rfire = self.ushort()
+			self.rcold = self.ushort()
+			self.rpoison = self.ushort()
+			self.renergy = self.ushort()
+			self.luck = self.ushort()
+			self.mindmg = self.ushort()
+			self.maxdmg = self.ushort()
+			self.tithing = self.uint()
+		if flag >= 6:
+			self.hitinc = self.ushort()
+			self.swinginc = self.ushort()
+			self.dmginc = self.ushort()
+			self.lrc = self.ushort()
+			self.hpregen = self.ushort()
+			self.stamregen = self.ushort()
+			self.manaregen = self.ushort()
+			self.reflectphysical = self.ushort()
+			self.enhancepot = self.ushort()
+			self.definc = self.ushort()
+			self.spellinc = self.ushort()
+			self.fcr = self.ushort()
+			self.fc = self.ushort()
+			self.lmc = self.ushort()
+			self.strinc = self.ushort()
+			self.dexinc = self.ushort()
+			self.intinc = self.ushort()
+			self.hpinc = self.ushort()
+			self.staminc = self.ushort()
+			self.manainc = self.ushort()
+			self.maxhpinc = self.ushort()
+			self.maxstaminc = self.ushort()
+			self.maxmanainc = self.ushort()
+
+
 class SendSkillsPacket(Packet):
 	''' When received contains a single skill or full list of skills
 	When sent by client, sets skill lock for a single skill '''
@@ -1073,6 +1177,7 @@ class Ph:
 	REQUEST_STATUS           = 0x34
 	CLIENT_VERSION           = 0xbd
 	SINGLE_CLICK             = 0x09
+	DOUBLE_CLICK             = 0x06
 	UNICODE_SPEECH_REQUEST   = 0xad
 	PING                     = PingPacket.cmd
 	ENABLE_FEATURES          = EnableFeaturesPacket.cmd
@@ -1095,7 +1200,9 @@ class Ph:
 	UPDATE_PLAYER            = UpdatePlayerPacket.cmd
 	OBJECT_INFO              = ObjectInfoPacket.cmd
 	DELETE_OBJECT            = DeleteObjectPacket.cmd
+	DRAW_CONTAINER           = DrawContainerPacket.cmd
 	ADD_ITEM_TO_CONTAINER    = AddItemToContainerPacket.cmd
+	ADD_ITEMS_TO_CONTAINER   = AddItemsToContainerPacket.cmd
 	ALLOW_ATTACK             = AllowAtackPacket.cmd
 	TIP_WINDOW               = TipWindowPacket.cmd
 	PLAY_SOUND               = PlaySoundPacket.cmd
@@ -1103,6 +1210,7 @@ class Ph:
 	UPDATE_HEALTH            = UpdateHealthPacket.cmd
 	UPDATE_MANA              = UpdateManaPacket.cmd
 	UPDATE_STAMINA           = UpdateStaminaPacket.cmd
+	STATUS_BAR_INFO          = StatusBarInfoPacket.cmd
 	SEND_SKILL               = SendSkillsPacket.cmd
 	SEND_GUMP                = SendGumpDialogPacket.cmd
 
@@ -1131,7 +1239,9 @@ class Ph:
 		UPDATE_PLAYER:            UpdatePlayerPacket,
 		OBJECT_INFO:              ObjectInfoPacket,
 		DELETE_OBJECT:            DeleteObjectPacket,
+		DRAW_CONTAINER:           DrawContainerPacket,
 		ADD_ITEM_TO_CONTAINER:    AddItemToContainerPacket,
+		ADD_ITEMS_TO_CONTAINER:   AddItemsToContainerPacket,
 		ALLOW_ATTACK:             AllowAtackPacket,
 		TIP_WINDOW:               TipWindowPacket,
 		PLAY_SOUND:               PlaySoundPacket,
@@ -1139,6 +1249,7 @@ class Ph:
 		UPDATE_HEALTH:            UpdateHealthPacket,
 		UPDATE_MANA:              UpdateManaPacket,
 		UPDATE_STAMINA:           UpdateStaminaPacket,
+		STATUS_BAR_INFO:          StatusBarInfoPacket,
 		SEND_SKILL:               SendSkillsPacket,
 		SEND_GUMP:                SendGumpDialogPacket,
 	}

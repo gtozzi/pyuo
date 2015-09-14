@@ -19,6 +19,10 @@ class Brain(threading.Thread):
 		self.eventsLock = threading.Lock()
 		## Client reference
 		self.client = None
+		## Reference to current player
+		self.player = None
+		## Reference to list of known objects
+		self.objects = None
 		## Default timeout while waiting for events
 		self.timeout = 5
 		super().__init__()
@@ -26,6 +30,8 @@ class Brain(threading.Thread):
 	def start(self, client):
 		''' Prepare the script for startup, internal '''
 		self.client = client
+		self.player = self.client.player
+		self.objects = self.client.objects
 		self.started = True
 		super().start()
 
