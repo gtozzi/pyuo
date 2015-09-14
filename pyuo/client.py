@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 
 '''
-Ultima online text client (experiment)
+Python Ultima Online text client (experiment)
 '''
 
 import struct
 import logging
 import ipaddress
-import net
 import time
+
+from . import net
+from . import brain
 
 
 class status:
@@ -23,6 +25,15 @@ class status:
 				raise StatusError("Status {} not valid, need {}".format(args[0].status, self.status))
 			return f(*args)
 		return wrapper
+
+
+def logincomplete(f):
+	''' Decorator, check that login procedure is complete '''
+	def wrapper(client, *args, **kwargs):
+		if not client.lc or client.status != 'game':
+			raise StatusError("Must complete login procedure before calling this")
+		return f(client, *args, **kwargs)
+	return wrapper
 
 
 class UOBject:
@@ -150,6 +161,10 @@ class Client:
 
 	## Minimum interval between two pings
 	PING_INTERVAL = 30
+	## Version sent to server
+	VERSION = '5.0.9.1'
+	## Language sent to server
+	LANG = 'ENU'
 
 	def __init__(self):
 		## Dict info about last server connected to {ip, port, user, pass}
@@ -284,12 +299,22 @@ class Client:
 		self.status = 'game'
 
 	@status('game')
-	def play(self):
-		''' Starts the endless game loop '''
+	def play(self, script):
+		''' Starts the endless game loop
+		@script Thread: The brain thread will be started once login is completed
+		'''
 		self.ping = time.time() + self.PING_INTERVAL
+
+		if not isinstance(script, brain.Brain):
+			raise RuntimeError("Unknown brain, expecting a Brain instance, got {}".format(type(brain)))
 
 		while True:
 			pkt = self.receive()
+
+			# Check if brain is alive
+			if script.started and not script.is_alive():
+				self.log.info("Brain died, terminating")
+				break
 
 			# Send ping if needed
 			if self.lc and self.ping < time.time():
@@ -355,6 +380,8 @@ class Client:
 					mob = Mobile(pkt)
 					self.objects[mob.serial] = mob
 					self.log.info("New mobile: %s", mob)
+					# Auto single click for new mobiles
+					self.singleClick(mob)
 
 			elif isinstance(pkt, net.ObjectInfoPacket):
 				assert self.lc
@@ -390,6 +417,7 @@ class Client:
 
 			elif isinstance(pkt, net.UpdateHealthPacket):
 				assert self.lc
+				old = self.player.hp
 				if self.player.serial == pkt.serial:
 					self.player.maxhp = pkt.max
 					self.player.hp = pkt.cur
@@ -399,9 +427,11 @@ class Client:
 					mob.maxhp = pkt.max
 					mob.hp = pkt.cur
 					self.log.info("0x%X's HP: %d/%d", pkt.serial, pkt.cur, pkt.max)
+				script.event(brain.Event(brain.Event.EVT_HP_CHANGED, old=old, new=self.player.hp))
 
 			elif isinstance(pkt, net.UpdateManaPacket):
 				assert self.lc
+				old = self.player.mana
 				if self.player.serial == pkt.serial:
 					self.player.maxmana = pkt.max
 					self.player.mana = pkt.cur
@@ -411,9 +441,11 @@ class Client:
 					mob.maxmana = pkt.max
 					mob.mana = pkt.cur
 					self.log.info("0x%X's MANA: %d/%d", pkt.serial, pkt.cur, pkt.max)
+				script.event(brain.Event(brain.Event.EVT_MANA_CHANGED, old=old, new=self.player.mana))
 
 			elif isinstance(pkt, net.UpdateStaminaPacket):
 				assert self.lc
+				old = self.player.stam
 				if self.player.serial == pkt.serial:
 					self.player.maxstam = pkt.max
 					self.player.stam = pkt.cur
@@ -423,6 +455,7 @@ class Client:
 					mob.maxstam = pkt.max
 					mob.stam = pkt.cur
 					self.log.info("0x%X's STAM: %d/%d", pkt.serial, pkt.cur, pkt.max)
+				script.event(brain.Event(brain.Event.EVT_STAM_CHANGED, old=old, new=self.player.stam))
 
 			elif isinstance(pkt, net.GeneralInfoPacket):
 				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
@@ -474,6 +507,21 @@ class Client:
 			elif isinstance(pkt, net.LoginCompletePacket):
 				assert not self.lc
 				self.lc = True
+				# Send some initial info packets      ..
+				self.requestSkills()
+				self.sendVersion()
+				# Original client also sends this now
+				# bf 00 0d 00 05 00 00 03 20 01 00 00 a7 - General info 0x05
+				self.sendClientType()
+				# Original client also sends this now, seems to also send it again later
+				# 34 ed ed ed ed 04 00 45 dd f5 - Get Player status something
+				self.sendLanguage()
+				# General info (0xbf) subcommand 0x05 is not sent. Should I?
+				# Request tip/notice (0xa7) is not sent. Should I?
+				# General info (0xbf) subcommand 0x09 (lang?) is not sent. Should I?
+				
+				# Start the brain
+				script.start(self)
 
 			elif isinstance(pkt, net.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
@@ -499,6 +547,73 @@ class Client:
 
 			else:
 				self.log.warn("Unhandled packet {}".format(pkt.__class__))
+
+	@logincomplete
+	def sendVersion(self):
+		''' Sends client version to server, should not send it twice '''
+		po = net.PacketOut(net.Ph.CLIENT_VERSION)
+		po.ulen()
+		po.string(self.VERSION, len(self.VERSION)+1)
+		self.send(po)
+
+	@logincomplete
+	def sendLanguage(self):
+		''' Sends client lamguage to server, should not send it twice '''
+		po = net.PacketOut(net.Ph.GENERAL_INFO)
+		po.ulen()
+		po.ushort(0x0b) # subcommad
+		po.string(self.LANG, len(self.LANG)+1)
+		self.send(po)
+
+	@logincomplete
+	def sendClientType(self):
+		''' Sends client type flag, should be sent only once at login '''
+		po = net.PacketOut(net.Ph.GENERAL_INFO)
+		po.ulen()
+		po.uint(0x1f) # 0x1f for login, something else for char create=
+		self.send(po)
+
+	@logincomplete
+	def requestSkills(self):
+		''' Requests skill info (0x3a packet) '''
+		po = net.PacketOut(net.Ph.REQUEST_STATUS)
+		po.uint(0xedededed) #Pattern (unknown)
+		po.uchar(0x05) # Type
+		po.uint(self.player.serial)
+		self.send(po)
+
+	@logincomplete
+	def requestStatus(self):
+		''' Requests basic statuc (0x11 packet) '''
+		po = net.PacketOut(net.Ph.REQUEST_STATUS)
+		po.uint(0xedededed) #Pattern (unknown)
+		po.uchar(0x04) # Type
+		po.uint(self.player.serial)
+		self.send(po)
+
+	@logincomplete
+	def singleClick(self, obj):
+		''' Sends a single click for the given object (Item/Mobile) to server '''
+		po = net.PacketOut(net.Ph.SINGLE_CLICK)
+		po.uint(obj.serial)
+		self.send(po)
+
+	@logincomplete
+	def say(self, text, font=3, color=0):
+		''' Say something, in unicode
+		@param text string: Any unicode string
+		@param font int: Font code, usually 3
+		@param colot int: Font color, usually 0
+		'''
+		po = net.PacketOut(net.Ph.UNICODE_SPEECH_REQUEST)
+		po.ulen()
+		po.uchar(0x00) # Type TODO: implement other types
+		po.ushort(color)
+		po.ushort(font)
+		assert len(self.LANG) == 3
+		po.string(self.LANG, 4)
+		po.string(text, len(text)*2 + 1, True)
+		self.send(po)
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
@@ -562,6 +677,7 @@ if __name__ == '__main__':
 	parser.add_argument('port', type=int, help='Server port')
 	parser.add_argument('user', help='Username')
 	parser.add_argument('pwd', help='Password')
+	parser.add_argument('srvidx', type=int, help="Gameserver's Index")
 	parser.add_argument('charidx', type=int, help="Character's Index")
 	parser.add_argument('charname', help="Character's Name")
 	parser.add_argument('-v', '--verbose', action='store_true', help='Show debug output')
@@ -571,7 +687,7 @@ if __name__ == '__main__':
 
 	c = Client()
 	servers = c.connect(args.ip, args.port, args.user, args.pwd)
-	chars = c.selectServer(3)
+	chars = c.selectServer(args.srvidx)
 	c.selectCharacter(args.charname, args.charidx)
 	c.play()
 	print('done')

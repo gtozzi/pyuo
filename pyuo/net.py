@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
-''' Network classes for python UO client '''
+''' Network classes for Python Ultima Online text client '''
 
-import abc
+import time
 import socket
 import struct
 import ipaddress
@@ -294,18 +294,25 @@ class Network:
 		self.log.debug('-> 0x%0.2X, %d bytes\n"%s"', data[0], len(data), data)
 		self.sock.send(data)
 
-	def recv(self):
+	def recv(self, force=False):
 		''' Reads next packet from the server, waits until a full packet is received '''
 
 		# Wait for a full packet
-		if len(self.buf) < 1:
+		if len(self.buf) < 1 or force:
 			data = self.sock.recv(4096)
 			if not len(data):
 				raise RuntimeError("Disconnected");
 			self.buf += data
 
 		if self.compress:
-			raw, size = self.decompress(self.buf)
+			try:
+				raw, size = self.decompress(self.buf)
+			except NoFullPacketError:
+				# Not enough data to make a full packet. Sleep for a while and try again
+				# TODO: definitely handle this better
+				self.log.warn("No full packet. Waiting... (%d bytes in buffer)", len(self.buf))
+				time.sleep(1)
+				return self.recv(True)
 		else:
 			raw = self.buf
 			size = len(self.buf)
@@ -358,12 +365,7 @@ class Network:
 				bitNum = 8;
 				srcPos += 1
 
-			# check to see if the current codeword has no end
-			# if not, make it an incomplete byte
-			if srcPos == len(buf):
-				raise NotImplementedError("Incomplete packet")
-
-		raise NotImplementedError("No data")
+		raise NoFullPacketError("No full packet could be read")
 
 
 class Packet:
@@ -1001,6 +1003,64 @@ class UpdateStaminaPacket(UpdateVitalPacket):
 		super().__init__(buf)
 
 
+class SendSkillsPacket(Packet):
+	''' When received contains a single skill or full list of skills
+	When sent by client, sets skill lock for a single skill '''
+
+	cmd = 0x3a
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		typ = self.uchar() # 0x00 full list, 0xff single skill, 0x02 full with caps, 0xdf single with caps
+		self.skills = {}
+		while True:
+			id = self.ushort()
+			if not id:
+				break
+			assert id not in self.skills
+			self.skills[id] = {
+				'id': id,
+				'val': self.ushort(), # Current value, in tenths
+				'base': self.ushort(), # Base value, in tenths
+				'lock': self.uchar(), # Lock status 0 = up, 1 = down, 2 =locked
+				'cap': self.ushort() if typ == 0x02 or typ == 0xdf else None
+			}
+
+
+class SeasonInfoPacket(Packet):
+	''' Seasonal Information Packet '''
+
+	cmd = 0xbc
+	length = 3
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.flag = self.uchar()
+		self.sound = self.uchar()
+
+
+class SendGumpDialogPacket(Packet):
+	''' Receiving a gump from the server '''
+
+	cmd = 0xb0
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.gumpid = self.uint()
+		self.x = self.uint()
+		self.y = self.uint()
+		cmdLen = self.ushort()
+		self.commands = self.string(cmdLen)
+		textLines = self.ushort()
+		self.texts = []
+		for i in range(0, textLines):
+			tlen = self.ushort() # In unicode 2-bytes chars
+			self.texts.append(self.string(tlen*2))
+
+
 class Ph:
 	''' Packet Handler '''
 
@@ -1010,6 +1070,10 @@ class Ph:
 	CHARACTERS               = CharactersPacket.cmd
 	CONNECT_TO_GAME_SERVER   = ConnectToGameServerPacket.cmd
 	GAME_SERVER_LOGIN        = 0x91
+	REQUEST_STATUS           = 0x34
+	CLIENT_VERSION           = 0xbd
+	SINGLE_CLICK             = 0x09
+	UNICODE_SPEECH_REQUEST   = 0xad
 	PING                     = PingPacket.cmd
 	ENABLE_FEATURES          = EnableFeaturesPacket.cmd
 	CHAR_LOCALE_BODY         = CharLocaleBodyPacket.cmd
@@ -1026,6 +1090,7 @@ class Ph:
 	WAR_MODE                 = WarModePacket.cmd
 	LOGIN_COMPLETE           = LoginCompletePacket.cmd
 	SET_WEATHER              = SetWeatherPacket.cmd
+	SEASON_INFO              = SeasonInfoPacket.cmd
 	DRAW_OBJECT              = DrawObjectPacket.cmd
 	UPDATE_PLAYER            = UpdatePlayerPacket.cmd
 	OBJECT_INFO              = ObjectInfoPacket.cmd
@@ -1038,6 +1103,8 @@ class Ph:
 	UPDATE_HEALTH            = UpdateHealthPacket.cmd
 	UPDATE_MANA              = UpdateManaPacket.cmd
 	UPDATE_STAMINA           = UpdateStaminaPacket.cmd
+	SEND_SKILL               = SendSkillsPacket.cmd
+	SEND_GUMP                = SendGumpDialogPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -1059,6 +1126,7 @@ class Ph:
 		WAR_MODE:                 WarModePacket,
 		LOGIN_COMPLETE:           LoginCompletePacket,
 		SET_WEATHER:              SetWeatherPacket,
+		SEASON_INFO:              SeasonInfoPacket,
 		DRAW_OBJECT:              DrawObjectPacket,
 		UPDATE_PLAYER:            UpdatePlayerPacket,
 		OBJECT_INFO:              ObjectInfoPacket,
@@ -1071,6 +1139,8 @@ class Ph:
 		UPDATE_HEALTH:            UpdateHealthPacket,
 		UPDATE_MANA:              UpdateManaPacket,
 		UPDATE_STAMINA:           UpdateStaminaPacket,
+		SEND_SKILL:               SendSkillsPacket,
+		SEND_GUMP:                SendGumpDialogPacket,
 	}
 
 	@staticmethod
@@ -1088,6 +1158,13 @@ class PacketOut:
 	def __init__(self, cmd):
 		self.buf = b''
 		self.uchar(cmd)
+		self.lenIdx = None
+
+	def ulen(self):
+		''' Special value: will place there an ushort containing packet length '''
+		assert self.lenIdx is None
+		self.lenIdx = len(self.buf)
+		self.ushort(0)
 
 	def uchar(self, val):
 		''' Add an unsigned char (byte) to the packet '''
@@ -1113,13 +1190,13 @@ class PacketOut:
 			raise ValueError("UInt {} out of range".format(val))
 		self.buf += struct.pack('>I', val)
 
-	def string(self, val, length):
+	def string(self, val, length, unicode=False):
 		''' Adds a string to the packet '''
 		if not isinstance(val, str):
 			raise TypeError("Expected str, got {}".format(type(val)))
 		if len(val) > length:
 			raise ValueError('String "{}" too long'.format(val))
-		self.buf += Util.fixStr(val, length)
+		self.buf += Util.fixStr(val, length, unicode)
 
 	def ip(self, val):
 		''' Adds an ip to the packet '''
@@ -1129,6 +1206,9 @@ class PacketOut:
 
 	def getBytes(self):
 		''' Returns the packet as bytes '''
+		# Replace length if needed
+		if self.lenIdx is not None:
+			self.buf = self.buf[:self.lenIdx] + struct.pack('>H', len(self.buf)) + self.buf[self.lenIdx+2:]
 		return self.buf
 
 
@@ -1136,11 +1216,14 @@ class Util:
 	''' Utility class for conversions and so on '''
 
 	@staticmethod
-	def fixStr(string, length):
+	def fixStr(string, length, unicode=False):
 		''' Convert a str to fixed length, return bytes '''
+		##TODO: Better handling on unicode
 		enc = string.encode('ascii')
 		ret = b''
 		for i in range(0,length):
+			if unicode:
+				ret += b'\x00'
 			try:
 				ret += bytes([enc[i]])
 			except IndexError:
@@ -1155,3 +1238,8 @@ class Util:
 		except UnicodeDecodeError:
 			dec = byt.decode('iso8859-15')
 		return dec.rstrip('\x00')
+
+
+class NoFullPacketError(Exception):
+	''' Exception thrown when no full packet is available '''
+	pass
