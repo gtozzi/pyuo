@@ -7,6 +7,7 @@ import socket
 import struct
 import ipaddress
 import logging
+import zlib
 
 
 class Network:
@@ -1119,9 +1120,13 @@ class SendSkillsPacket(Packet):
 		typ = self.uchar() # 0x00 full list, 0xff single skill, 0x02 full with caps, 0xdf single with caps
 		self.skills = {}
 		while True:
-			id = self.ushort()
-			if not id:
+			try:
+				id = self.ushort()
+			except EOFError:
 				break
+			else:
+				if not id:
+					break
 			assert id not in self.skills
 			self.skills[id] = {
 				'id': id,
@@ -1163,6 +1168,31 @@ class SendGumpDialogPacket(Packet):
 		for i in range(0, textLines):
 			tlen = self.ushort() # In unicode 2-bytes chars
 			self.texts.append(self.string(tlen*2))
+		self.uchar() # Trailing byte? TODO: check this
+
+
+class CompressedGumpPacket(Packet):
+	''' Receiving a compressed gump from the server '''
+
+	cmd = 0xdd
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.serial = self.uint()
+		self.gumpid = self.uint()
+		self.x = self.uint()
+		self.y = self.uint()
+		cLen = self.uint()
+		dLen = self.uint()
+		self.commands = zlib.decompress(self.pb(cLen-4))
+		assert len(self.commands) == dLen
+		textLines = self.uint()
+		ctxtLen = self.uint()
+		dtxtLen = self.uint()
+		self.texts = zlib.decompress(self.pb(ctxtLen-4))
+		assert len(self.texts) == dtxtLen
+		self.uchar() # Trailing byte?
 
 
 class TargetCursorPacket(Packet):
@@ -1236,6 +1266,7 @@ class Ph:
 	STATUS_BAR_INFO          = StatusBarInfoPacket.cmd
 	SEND_SKILL               = SendSkillsPacket.cmd
 	SEND_GUMP                = SendGumpDialogPacket.cmd
+	COMPRESSED_GUMP          = CompressedGumpPacket.cmd
 	TARGET_CURSOR            = TargetCursorPacket.cmd
 
 	HANDLERS = {
@@ -1276,6 +1307,7 @@ class Ph:
 		STATUS_BAR_INFO:          StatusBarInfoPacket,
 		SEND_SKILL:               SendSkillsPacket,
 		SEND_GUMP:                SendGumpDialogPacket,
+		COMPRESSED_GUMP:          CompressedGumpPacket,
 		TARGET_CURSOR:            TargetCursorPacket,
 	}
 
