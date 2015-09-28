@@ -1192,7 +1192,7 @@ class CompressedGumpPacket(Packet):
 		dtxtLen = self.uint()
 		self.texts = zlib.decompress(self.pb(ctxtLen-4))
 		assert len(self.texts) == dtxtLen
-		self.uchar() # Trailing byte?
+		#self.uchar() # Trailing byte?
 
 
 class TargetCursorPacket(Packet):

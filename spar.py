@@ -22,18 +22,18 @@ class MyBrain(brain.Brain):
 		self.nextHeal = 0
 		self.client.say("Hello, world!")
 
-	def onHpChange(self, old, new):
-		if self.player.hp < self.player.maxhp - 10 and time.time() > self.nextHeal:
-			# Heal myself
-			bp = self.player.openBackPack()
-			for item in bp:
-				if item.graphic == self.CLEAN_BANDAGES:
-					print("Using bandages")
-					item.use()
-					tgt = self.client.waitForTarget(timeout=10)
-					if tgt:
-						self.nextHeal = time.time() + 10
-						tgt.target(self.player)
+	#def onHpChange(self, old, new):
+		#if self.player.hp < self.player.maxhp - 10 and time.time() > self.nextHeal:
+			## Heal myself
+			#bp = self.player.openBackPack()
+			#for item in bp:
+				#if item.graphic == self.CLEAN_BANDAGES:
+					#print("Using bandages")
+					#item.use()
+					#tgt = self.client.waitForTarget(timeout=10)
+					#if tgt:
+						#self.nextHeal = time.time() + 10
+						#tgt.target(self.player)
 
 	def loop(self):
 		# Say a Chuck Norris Fact
@@ -51,7 +51,7 @@ class MyBrain(brain.Brain):
 
 if __name__ == '__main__':
 	# Configure debug output
-	logging.basicConfig(level=logging.INFO)
+	logging.basicConfig(level=logging.DEBUG)
 
 	# Read configuration
 	conf = configparser.ConfigParser()

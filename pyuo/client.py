@@ -671,7 +671,6 @@ class Client:
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
 
 			elif isinstance(pkt, net.SendSpeechPacket) or isinstance(pkt, net.UnicodeSpeech):
-				assert self.lc
 				if pkt.type == 0x00:
 					what = "Say"
 				elif pkt.type == 0x01:
@@ -696,7 +695,10 @@ class Client:
 					what = "Unknown message"
 
 				p = "u" if isinstance(pkt, net.UnicodeSpeech) else ""
-				self.log.info('%s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
+				if self.lc:
+					self.log.info('%s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
+				else:
+					self.log.warn('EARLY %s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
 
 			elif isinstance(pkt, net.TargetCursorPacket):
 				assert self.target is None
