@@ -2,7 +2,7 @@
 
 '''
 AI classes for Python Ultima Online text client
-Copytight (C) 2015-2016 Gabriele Tozzi
+Copyright (C) 2015-2016 Gabriele Tozzi
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

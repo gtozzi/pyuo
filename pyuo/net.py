@@ -2,7 +2,7 @@
 
 '''
 Network classes for Python Ultima Online text client
-Copytight (C) 2015-2016 Gabriele Tozzi
+Copyright (C) 2015-2016 Gabriele Tozzi
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -965,7 +965,7 @@ class DrawContainerPacket(Packet):
 		self.gump = self.ushort()
 
 
-class AllowAtackPacket(Packet):
+class AllowAttackPacket(Packet):
 	''' Allow/Refuse attack '''
 
 	cmd = 0xaa
@@ -1273,7 +1273,7 @@ class Ph:
 	DRAW_CONTAINER           = DrawContainerPacket.cmd
 	ADD_ITEM_TO_CONTAINER    = AddItemToContainerPacket.cmd
 	ADD_ITEMS_TO_CONTAINER   = AddItemsToContainerPacket.cmd
-	ALLOW_ATTACK             = AllowAtackPacket.cmd
+	ALLOW_ATTACK             = AllowAttackPacket.cmd
 	TIP_WINDOW               = TipWindowPacket.cmd
 	PLAY_SOUND               = PlaySoundPacket.cmd
 	LOGIN_DENIED             = LoginDeniedPacket.cmd
@@ -1314,7 +1314,7 @@ class Ph:
 		DRAW_CONTAINER:           DrawContainerPacket,
 		ADD_ITEM_TO_CONTAINER:    AddItemToContainerPacket,
 		ADD_ITEMS_TO_CONTAINER:   AddItemsToContainerPacket,
-		ALLOW_ATTACK:             AllowAtackPacket,
+		ALLOW_ATTACK:             AllowAttackPacket,
 		TIP_WINDOW:               TipWindowPacket,
 		PLAY_SOUND:               PlaySoundPacket,
 		LOGIN_DENIED:             LoginDeniedPacket,

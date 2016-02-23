@@ -2,7 +2,7 @@
 
 '''
 Python Ultima Online text client (experiment)
-Copytight (C) 2015-2016 Gabriele Tozzi
+Copyright (C) 2015-2016 Gabriele Tozzi
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -617,7 +617,7 @@ class Client:
 				assert self.player.war is None
 				self.player.war = pkt.war
 
-			elif isinstance(pkt, net.AllowAtackPacket):
+			elif isinstance(pkt, net.AllowAttackPacket):
 				assert self.lc
 				self.player.target = pkt.serial
 				self.log.info("Target set to 0x%X", self.player.target)
