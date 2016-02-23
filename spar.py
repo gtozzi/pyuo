@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+'''
+This is just a rough example sparring script
+'''
+
 import configparser
 import logging
 import http.client
