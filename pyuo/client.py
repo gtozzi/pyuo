@@ -896,7 +896,6 @@ class Client:
 		pkt = self.net.recv()
 
 		if expect and pkt.cmd != expect:
-			print(expect,pkt.cmd)
 			raise UnexpectedPacketError("Expecting 0x%0.2X packet, got 0x%0.2X intead" % (expect, pkt.cmd))
 
 		return pkt
