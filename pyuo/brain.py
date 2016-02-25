@@ -54,14 +54,8 @@ class Brain(threading.Thread):
 		''' This is the main Brain thread entry point, contains the main loop, internal '''
 
 		self.init()
-		
-		try:
-			main = threading.main_thread()
-		except:
-			for thread in threading.enumerate():
-				if thread.__class__.__name__ == '_MainThread':
-					main = thread
-					break
+
+		main = threading.main_thread()
 
 		while True:
 			if not main.is_alive():

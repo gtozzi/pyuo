@@ -21,18 +21,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 import struct
 import logging
-try:
-    import ipaddress
-except:
-	class ipaddress:
-		def __init__(self,ip):
-			self._ip=list(map(int,ip.split('.')))
-		@property
-		def packed(self):
-			return struct.pack(b'!I', int.from_bytes(self._ip,'big'))
-		@classmethod
-		def ip_address(cls,ip):
-			return cls(ip)
+import ipaddress
 import time
 import traceback
 
