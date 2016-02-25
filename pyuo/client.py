@@ -399,6 +399,7 @@ class Client:
 			@param user string: Username
 			@param pwd string: Password
 			@return list of dicts{name, tz, full, idx, ip}
+			@throws LoginDeniedError
 		'''
 
 		try:
@@ -429,7 +430,11 @@ class Client:
 		self.send(po)
 
 		# Get servers list
-		pkt = self.receive(net.Ph.SERVER_LIST)
+		pkt = self.receive((net.Ph.SERVER_LIST, net.Ph.LOGIN_DENIED))
+		if isinstance(pkt, net.LoginDeniedPacket):
+			self.log.error('login denied')
+			raise LoginDeniedError(pkt.reason)
+
 		self.log.debug("Received serverlist: %s", str(pkt.servers))
 
 		self.status = 'connected'
@@ -524,6 +529,7 @@ class Client:
 
 			# Process packet
 			if isinstance(pkt, net.LoginDeniedPacket):
+				self.log.error('login denied')
 				raise LoginDeniedError(pkt.reason)
 
 			elif isinstance(pkt, net.PingPacket):
@@ -887,14 +893,24 @@ class Client:
 
 	def receive(self, expect=None):
 		''' Receives next packet from the server
-		@param expect If given, throws an exception if packet type is not the expected one
+		@param expect int/str: If given, throws an exception if packet type is
+		                       not in the expected list/tuple
 		@return Packet
 		@throws UnexpectedPacketError
 		'''
 		pkt = self.net.recv()
 
-		if expect and pkt.cmd != expect:
-			raise UnexpectedPacketError("Expecting 0x%0.2X packet, got 0x%0.2X intead" % (expect, pkt.cmd))
+		if expect and isinstance(expect, int):
+			expect = (expect, )
+
+		if expect and pkt.cmd not in expect:
+			err = "Expecting "
+			if len(expect) == 1:
+				err += "0x%0.2X packet" % expect
+			else:
+				err += "one of %s packets" % '/'.join(["0x%0.2X"%x for x in expect])
+			err += ", got 0x%0.2X intead" % pkt.cmd
+			raise UnexpectedPacketError(err)
 
 		return pkt
 
@@ -913,7 +929,7 @@ class LoginDeniedError(Exception):
 	def __init__(self, code):
 		self.code = code
 		if code == 0x00:
-			mex = "Uncorrect name or password"
+			mex = "Incorrect name or password"
 		elif code == 0x01:
 			mex = "Someone is already using this account"
 		elif code == 0x02:
