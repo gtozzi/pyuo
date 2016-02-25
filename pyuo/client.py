@@ -21,6 +21,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 import struct
 import logging
+import socket
 import ipaddress
 import time
 import traceback
@@ -391,20 +392,28 @@ class Client:
 		self.cursor = None
 
 	@status('disconnected')
-	def connect(self, ip, port, user, pwd):
+	def connect(self, host, port, user, pwd):
 		''' Conmnects to the server, returns a list of gameservers
-			@param ip string: Server IP
-			@param port string: Server IP
+			@param host string: Server IP address or hostname
+			@param port string: Server port
 			@param user string: Username
 			@param pwd string: Password
 			@return list of dicts{name, tz, full, idx, ip}
 		'''
+
+		try:
+			ip = ipaddress.ip_address(host)
+		except ValueError:
+			self.log.info('resolving %s', host)
+			ip = ipaddress.ip_address(socket.gethostbyname(host))
+
 		self.server = {
 			'ip': ip,
 			'port': port,
 			'user': user,
 			'pass': pwd,
 		}
+
 		self.log.info('connecting')
 		self.net = net.Network(self.server['ip'], self.server['port'])
 

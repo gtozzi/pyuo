@@ -292,12 +292,15 @@ class Network:
 	)
 
 	def __init__(self, ip, port):
-		''' Connects to the socket '''
+		''' Connects to the socket
+			@param ip IPv4Address: the IP object, from the ipaddress module
+			@param port int: the port
+		'''
 		## Logger, for internal usage
 		self.log = logging.getLogger('net')
 		## Socket connection, for internal usage
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.sock.connect((ip, port))
+		self.sock.connect((str(ip), port))
 		## Buffer, for internal usage
 		self.buf = b''
 		## Wether to use compression or not
