@@ -22,7 +22,18 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 import time
 import socket
 import struct
-import ipaddress
+try:
+    import ipaddress
+except:
+	class ipaddress:
+		def __init__(self,ip):
+			self._ip=list(map(int,ip.split('.')))
+		@property
+		def packed(self):
+			return struct.pack(b'!I', int.from_bytes(self._ip,'big'))
+		@classmethod
+		def ip_address(cls,ip):
+			return cls(ip)
 import logging
 import zlib
 
@@ -569,6 +580,8 @@ class GeneralInfoPacket(Packet):
 	SUB_CLOSESTATUS = 0x0c
 	## 3D Action
 	SUB_3DACT = 0x0e
+	## MegaCliLoc
+	SUB_MEGACLILOC = 0x10
 	## Enable map-diff files
 	SUB_MAPDIFF = 0x18
 
@@ -624,6 +637,9 @@ class GeneralInfoPacket(Packet):
 					'spatches': self.uint(),
 				})
 
+		elif self.sub == self.SUB_MEGACLILOC:
+			self.serial=self.uint()
+			self.revision=self.uint()
 		else:
 			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
 
@@ -843,8 +859,8 @@ class DrawObjectPacket(Packet):
 				'layer': layer,
 				'color': color,
 			})
-		if not len(self.equip):
-			self.uchar() # unused/closing
+#		if not len(self.equip):
+#			self.uchar() # unused/closing
 
 
 class UpdatePlayerPacket(Packet):
@@ -1234,6 +1250,14 @@ class TargetCursorPacket(Packet):
 		self.schar() # z
 		self.ushort() # graphic (if static tile)
 
+class MegaClilocRevPacket(Packet):
+	cmd = 0xdc
+	length = 9
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.revision = self.uint()
 
 class Ph:
 	''' Packet Handler '''
@@ -1285,6 +1309,7 @@ class Ph:
 	SEND_GUMP                = SendGumpDialogPacket.cmd
 	COMPRESSED_GUMP          = CompressedGumpPacket.cmd
 	TARGET_CURSOR            = TargetCursorPacket.cmd
+	MEGACLILOCREV            = MegaClilocRevPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -1326,6 +1351,7 @@ class Ph:
 		SEND_GUMP:                SendGumpDialogPacket,
 		COMPRESSED_GUMP:          CompressedGumpPacket,
 		TARGET_CURSOR:            TargetCursorPacket,
+		MEGACLILOCREV:            MegaClilocRevPacket,
 	}
 
 	@staticmethod

@@ -21,7 +21,18 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 import struct
 import logging
-import ipaddress
+try:
+    import ipaddress
+except:
+	class ipaddress:
+		def __init__(self,ip):
+			self._ip=list(map(int,ip.split('.')))
+		@property
+		def packed(self):
+			return struct.pack(b'!I', int.from_bytes(self._ip,'big'))
+		@classmethod
+		def ip_address(cls,ip):
+			return cls(ip)
 import time
 import traceback
 
@@ -885,7 +896,8 @@ class Client:
 		pkt = self.net.recv()
 
 		if expect and pkt.cmd != expect:
-			raise UnexpectedPacketError("Expecting 0x%0.2X packet, got 0x%0.2X intead" % expect, self.cmd)
+			print(expect,pkt.cmd)
+			raise UnexpectedPacketError("Expecting 0x%0.2X packet, got 0x%0.2X intead" % (expect, pkt.cmd))
 
 		return pkt
 

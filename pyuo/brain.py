@@ -54,8 +54,14 @@ class Brain(threading.Thread):
 		''' This is the main Brain thread entry point, contains the main loop, internal '''
 
 		self.init()
-
-		main = threading.main_thread()
+		
+		try:
+			main = threading.main_thread()
+		except:
+			for thread in threading.enumerate():
+				if thread.__class__.__name__ == '_MainThread':
+					main = thread
+					break
 
 		while True:
 			if not main.is_alive():
@@ -87,6 +93,10 @@ class Brain(threading.Thread):
 
 			if ev.type == Event.EVT_HP_CHANGED:
 				self.onHpChange(ev.old, ev.new)
+			elif ev.type == Event.EVT_MANA_CHANGED:
+				self.onManaChange(ev.old, ev.new)
+			elif ev.type == Event.EVT_STAM_CHANGED:
+				self.onStamChange(ev.old, ev.new)
 			else:
 				raise NotImplementedError("Unknown event {}",format(ev.type))
 
