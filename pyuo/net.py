@@ -627,8 +627,9 @@ class GeneralInfoPacket(Packet):
 				})
 
 		elif self.sub == self.SUB_MEGACLILOC:
-			self.serial=self.uint()
-			self.revision=self.uint()
+			self.serial = self.uint()
+			self.revision = self.uint()
+
 		else:
 			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
 
@@ -1239,7 +1240,10 @@ class TargetCursorPacket(Packet):
 		self.schar() # z
 		self.ushort() # graphic (if static tile)
 
+
 class MegaClilocRevPacket(Packet):
+	''' SE Introduced Revision '''
+
 	cmd = 0xdc
 	length = 9
 
@@ -1247,6 +1251,7 @@ class MegaClilocRevPacket(Packet):
 		super().__init__(buf)
 		self.serial = self.uint()
 		self.revision = self.uint()
+
 
 class Ph:
 	''' Packet Handler '''
