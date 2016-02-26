@@ -430,9 +430,11 @@ class Packet:
 		''' Returns next string of the given length from the buffer '''
 		return Util.varStr(self.pb(length))
 
-	def unicode_string(self, length):
-		''' Returns next string of the given length from the buffer '''
-		return self.pb(length).decode('utf_16_be').rstrip('\0')
+	def ucstring(self, length):
+		''' Returns next unicode string of the given length from the buffer '''
+		if length % 2:
+			raise ValueError('Length must be a multiple of 2')
+		return Util.varUStr(self.pb(length))
 
 	def ip(self):
 		''' Returns next string ip address from the buffer '''
@@ -777,7 +779,7 @@ class UnicodeSpeech(Packet):
 		self.font = self.ushort()
 		self.lang = self.string(4)
 		self.name = self.string(30)
-		self.msg = self.unicode_string(self.length-48)
+		self.msg = self.ucstring(self.length-48)
 
 
 class PlayMidiPacket(Packet):
@@ -1463,7 +1465,17 @@ class Util:
 			dec = byt.decode('utf8')
 		except UnicodeDecodeError:
 			dec = byt.decode('iso8859-15')
-		# Behave like the original client: truncate the string before first null char
+		return Util.nullTrunc(dec)
+
+	@staticmethod
+	def varUStr(byt):
+		''' Convert unicode bytes into a variable-length string '''
+		dec = byt.decode('utf_16_be')
+		return Util.nullTrunc(dec)
+
+	def nullTrunc(dec):
+		''' Truncates the given string before first null char
+		(just like the original client '''
 		zero = dec.find('\x00')
 		if zero >= 0:
 			for char in dec[zero:]:
@@ -1472,6 +1484,7 @@ class Util:
 					break
 			dec = dec[:zero]
 		return dec
+
 
 
 class NoFullPacketError(Exception):
