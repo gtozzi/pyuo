@@ -109,7 +109,7 @@ class Ui:
 
 		# Select server
 		self.log.debug(servers)
-		serverList = [ i['name'][:-1].strip().strip('\0') for i in servers ]
+		serverList = [ i['name'] for i in servers ]
 		idx = SelectDialog(self.scr, 'Select a server', serverList, 30, 5).select()
 		server = servers[idx]
 

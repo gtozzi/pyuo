@@ -1459,7 +1459,14 @@ class Util:
 			dec = byt.decode('utf8')
 		except UnicodeDecodeError:
 			dec = byt.decode('iso8859-15')
-		return dec.rstrip('\x00')
+		# Behave like the original client: truncate the string before first null char
+		p = dec.split('\x00', 1)
+		if len(p) > 1:
+			for char in p[1]:
+				if char != '\x00':
+					logging.warning('Truncating string "%s"', dec)
+					break
+		return p[0]
 
 
 class NoFullPacketError(Exception):
