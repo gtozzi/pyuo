@@ -20,7 +20,31 @@ class UiBrain(brain.Brain):
 	''' Handles client interaction '''
 
 	def __init__(self, ui):
+		super().__init__()
 		self.ui = ui
+
+	def init(self):
+		self.updVitals()
+		p = self.client.player
+		self.ui.updMisc(p.status, p.war, p.notoriety)
+		self.ui.updAspect(p.serial, p.graphic, p.color)
+		self.ui.updPosition(p.x, p.y, p.z, p.facing)
+
+	def updVitals(self):
+		p = self.client.player
+		self.ui.updVitals(p.hp, p.maxhp, p.mana, p.maxmana, p.stam, p.maxstam)
+
+	def loop(self):
+		pass
+
+	def onHpChange(self, old, new):
+		self.updVitals()
+
+	def onManaChange(self, old, new):
+		self.updVitals()
+
+	def onStamChange(self, old, new):
+		self.updVitals()
 
 
 class Ui:
@@ -33,10 +57,8 @@ class Ui:
 		self.scr.border(0)
 		self.panel = curses.panel.new_panel(self.scr)
 
-		# World window
-		self.wwin = curses.newwin(15, 15, 0, 0)
-		self.wwin.border(0)
-		#self.wwin.addch(7, 7, 'a')
+		# Map window
+		self.mwin = MapWindow(self.scr)
 
 		# Status window
 		self.swin = StatusWindow(self.scr)
@@ -78,7 +100,7 @@ class Ui:
 			try:
 				servers = self.cli.connect(host, port, user, pwd)
 			except client.LoginDeniedError as e:
-				self.swin.updLabel('status', 'login denied ({})'.format(e))
+				self.swin.updStatus('login denied ({})'.format(e))
 				self.swin.refresh()
 			else:
 				break
@@ -106,12 +128,13 @@ class Ui:
 
 		# Start brain
 		self.cli.selectCharacter(char['name'], idx)
+		self.updStatus('playing {}@{}'.format(char['name'], server['name']))
 		brain = UiBrain(self)
 		self.cli.play(brain)
 
 	def refreshAll(self):
 		self.scr.noutrefresh()
-		self.wwin.noutrefresh()
+		self.mwin.noutrefresh()
 		self.swin.noutrefresh()
 		self.lwin.noutrefresh()
 		curses.doupdate()
@@ -120,6 +143,86 @@ class Ui:
 		self.log.info(text)
 		self.swin.updLabel('status', text)
 		self.swin.refresh()
+
+	def formatVal(self, val, hex=False):
+		if val is None:
+			return '?'
+		if isinstance(val, int):
+			return "0x{:02X}".format(val) if hex else str(val)
+		return str(val)
+
+	def updVitals(self, hp, maxhp, mana, maxmana, stam, maxstam):
+		fv = self.formatVal
+		text = "hp {}/{}, mana {}/{}, stam {}/{}".format(
+				fv(hp), fv(maxhp), fv(mana), fv(maxmana), fv(stam), fv(maxstam))
+		self.swin.updLabel('vitals', text)
+		self.swin.refresh()
+
+	def updAspect(self, serial, graphic, color):
+		fh = lambda i: self.formatVal(i, True)
+		fv = self.formatVal
+		text = "ser: {}, gra: {}, col: {}".format(
+				fh(serial), fh(graphic), fv(color))
+		self.swin.updLabel('aspect', text)
+		self.swin.refresh()
+
+	def updMisc(self, status, war, notoriety):
+		stastr = []
+		if status is None:
+			stastr.append('?')
+		else:
+			if status & 0x01:
+				stastr.append('unk1')
+			if status & 0x02:
+				stastr.append('modpd')
+			if status & 0x04:
+				stastr.append('poison')
+			if status & 0x08:
+				stastr.append('golden')
+			if status & 0x10:
+				stastr.append('unk10')
+			if status & 0x20:
+				stastr.append('unk20')
+			if status & 0x40:
+				stastr.append('war')
+			if not len(stastr):
+				stastr.append('normal')
+		stastr = ','.join(stastr)
+
+		if war is None:
+			warstr = '?'
+		elif war:
+			warstr = '✓'
+		else:
+			warstr = '✗'
+
+		if notoriety is None:
+			notostr = '?'
+		elif notoriety == 1:
+			notostr = 'innocent'
+		elif notoriety == 2:
+			notostr = 'friend'
+		elif notoriety == 3:
+			notostr = 'animal'
+		elif notoriety == 4:
+			notostr = 'criminal'
+		elif notoriety == 5:
+			notostr = 'enemy'
+		elif notoriety == 6:
+			notostr = 'murderer'
+		elif notoriety == 7:
+			notostr = 'invul'
+		else:
+			notostr = 'unknown'
+
+		text = "sta: {}, war: {}, noto: {}".format(stastr, warstr, notostr)
+		self.swin.updLabel('misc', text)
+		self.swin.refresh()
+
+	def updPosition(self, x, y, z, facing):
+		self.mwin.updPosition(x, y, z, facing)
+		self.mwin.refresh()
+
 
 
 class BaseWindow:
@@ -141,6 +244,42 @@ class BaseWindow:
 		self.win.noutrefresh()
 
 
+class MapWindow(BaseWindow):
+	''' The mini map '''
+
+	WIDTH = 15
+	HEIGHT = 15
+	TOP = 0
+	LEFT = 0
+
+	def __init__(self, parent):
+		super().__init__(parent, self.HEIGHT, self.WIDTH, self.TOP, self.LEFT)
+
+	def updPosition(self, x, y, z, facing):
+		self.win.border(0)
+		self.win.addstr(0, 1, "{},{},{}".format(x,y,z))
+
+		if facing == 0:
+			fchar = '↑'
+		elif facing == 1:
+			fchar = '↗'
+		elif facing == 2:
+			fchar = '→'
+		elif facing == 3:
+			fchar = '↘'
+		elif facing == 4:
+			fchar = '↓'
+		elif facing == 5:
+			fchar = '↙'
+		elif facing == 6:
+			fchar = '←'
+		elif facing == 7:
+			fchar = '↖'
+		else:
+			fchar = '?'
+		self.win.addch(7, 7, fchar)
+
+
 class StatusWindow(BaseWindow):
 	''' The status window: wraps a ncurses window '''
 
@@ -150,14 +289,17 @@ class StatusWindow(BaseWindow):
 	TOP = 0
 	LEFT = 15
 	# Definition of updatable labels
-	LABELS = {
-		'status' : { 'x': 1, 'y': 1, 'l': 'status' },
-	}
+	LABELS = collections.OrderedDict([
+		('status', { 'x': 1, 'y': 1, 'l': 'status' }),
+		('vitals', { 'x': 1, 'y': 2, 'l': 'vitals' }),
+		('aspect', { 'x': 1, 'y': 3, 'l': 'aspect' }),
+		('misc',   { 'x': 1, 'y': 4, 'l': 'misc' }),
+	])
 
 	def __init__(self, parent):
 		super().__init__(parent, self.HEIGHT, self.WIDTH, self.TOP, self.LEFT)
 		for k, label in self.LABELS.items():
-			self.win.addstr(label['x'], label['y'], label['l'].upper()+':')
+			self.win.addstr(label['y'], label['x'], label['l'].upper()+':')
 
 	def updLabel(self, name, text):
 		''' Updates a label '''
