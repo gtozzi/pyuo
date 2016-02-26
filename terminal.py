@@ -16,10 +16,6 @@ from pyuo import client
 from pyuo import brain
 
 
-def sanitizeText(text):
-	''' removes NULL char from strings to correctly display via curses '''
-	return text.replace('\0','')
-
 class UiBrain(brain.Brain):
 	''' Handles client interaction '''
 
@@ -145,7 +141,7 @@ class Ui:
 
 	def updStatus(self, text):
 		self.log.info(text)
-		self.swin.updLabel('status', sanitizeText(text))
+		self.swin.updLabel('status', text)
 		self.swin.refresh()
 
 	def formatVal(self, val, hex=False):
@@ -460,7 +456,7 @@ class UiLogHandler(logging.Handler):
 
 		lines = self.format(record).splitlines()
 		for line in lines:
-			self.lwin.append(sanitizeText(line))
+			self.lwin.append(line)
 
 
 if __name__ == '__main__':
