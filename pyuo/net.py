@@ -1473,6 +1473,7 @@ class Util:
 		dec = byt.decode('utf_16_be')
 		return Util.nullTrunc(dec)
 
+	@staticmethod
 	def nullTrunc(dec):
 		''' Truncates the given string before first null char
 		(just like the original client '''
