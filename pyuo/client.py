@@ -773,7 +773,6 @@ class Client:
 				self.log.info('Ignoring sound packet')
 
 			elif isinstance(pkt, net.SetWeatherPacket):
-				assert self.lc
 				self.log.info('Ignoring weather packet')
 
 			elif isinstance(pkt, net.OverallLightLevelPacket):

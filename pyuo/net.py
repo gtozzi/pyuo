@@ -574,6 +574,8 @@ class GeneralInfoPacket(Packet):
 	SUB_3DACT = 0x0e
 	## MegaCliLoc
 	SUB_MEGACLILOC = 0x10
+	## Send House Revision State
+	SUB_HOUSE_REV = 0x1d
 	## Enable map-diff files
 	SUB_MAPDIFF = 0x18
 
@@ -632,6 +634,10 @@ class GeneralInfoPacket(Packet):
 		elif self.sub == self.SUB_MEGACLILOC:
 			self.serial = self.uint()
 			self.revision = self.uint()
+
+		elif self.sub == self.SUB_HOUSE_REV:
+			self.serial = self.uint()
+			self.rev = self.uint()
 
 		else:
 			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
