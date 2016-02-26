@@ -430,6 +430,10 @@ class Packet:
 		''' Returns next string of the given length from the buffer '''
 		return Util.varStr(self.pb(length))
 
+	def unicode_string(self, length):
+		''' Returns next string of the given length from the buffer '''
+		return self.pb(length).decode('utf_16_be').rstrip('\0')
+
 	def ip(self):
 		''' Returns next string ip address from the buffer '''
 		return struct.unpack('BBBB', self.pb(4))
@@ -771,9 +775,9 @@ class UnicodeSpeech(Packet):
 		self.type = self.uchar()
 		self.color = self.ushort()
 		self.font = self.ushort()
-		self.lang = self.ushort()
+		self.lang = self.string(4)
 		self.name = self.string(30)
-		self.msg = self.string(self.length-48+2)
+		self.msg = self.unicode_string(self.length-48)
 
 
 class PlayMidiPacket(Packet):
@@ -1460,13 +1464,14 @@ class Util:
 		except UnicodeDecodeError:
 			dec = byt.decode('iso8859-15')
 		# Behave like the original client: truncate the string before first null char
-		p = dec.split('\x00', 1)
-		if len(p) > 1:
-			for char in p[1]:
+		zero = dec.find('\x00')
+		if zero >= 0:
+			for char in dec[zero:]:
 				if char != '\x00':
 					logging.warning('Truncating string "%s"', dec)
 					break
-		return p[0]
+			dec = dec[:zero]
+		return dec
 
 
 class NoFullPacketError(Exception):
