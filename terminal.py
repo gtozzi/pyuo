@@ -5,6 +5,7 @@ A curses-based UO client
 '''
 
 import os
+import sys
 import time
 import logging
 import collections
@@ -224,6 +225,70 @@ class Ui:
 		self.mwin.refresh()
 
 
+class CursesWinProxy:
+	''' Proxy class over curses window '''
+
+	def __init__(self, nlines, ncols, beginy, beginx, parent=None):
+		''' Creates a new window (curses.newwin()),
+		or subbwindow (parent.subwin()) if parent is given '''
+		if parent:
+			self.win = parent.subwin(nlines, ncols, beginy, beginx)
+		else:
+			self.win = curses.newwin(nlines, ncols, beginy, beginx)
+
+	def panel(self):
+		''' Create and return a new panel based on this window '''
+		return curses.panel.new_panel(self.win)
+
+	def textbox(self):
+		''' Create and return a new TextBox based on this window '''
+		return curses.textpad.Textbox(self.win)
+
+	def sanitize(self, str):
+		''' Replaces control chars in the given string
+		so that they don't interfere with curses '''
+		out = ''
+		for char in str:
+			code = ord(char)
+			if code < 0x20:
+				out += chr(0x2400 + code)
+			elif code == 0x7f:
+				out += '␡'
+			elif code == 0xff:
+				out += '␠'
+			else:
+				out += char
+		return out
+
+	def addch(self, y, x, ch, attr=0):
+		''' Like self.win.addch() but with sanitization '''
+		self.win.addch(y, x, self.sanitize(ch), attr)
+
+	def addnstr(self, y, x, str, n, attr=0):
+		''' Like self.win.addnstr() but with sanitization '''
+		self.win.addnstr(y, x, self.sanitize(str), n, attr)
+
+	def addstr(self, y, x, str, attr=0):
+		''' Like self.win.addstr() but with sanitization '''
+		self.win.addstr(y, x, self.sanitize(str), attr)
+
+	def __getattr__(self, name):
+		if name == 'win':
+			return AttributeError()
+		return getattr(self.win, name)
+
+	def __setattr__(self, name, value):
+		if name == 'win':
+			super().__setattr__(name, value)
+		else:
+			setattr(self.win, name, value)
+
+	def __delattr__(self, name):
+		if name == 'win':
+			super().__delattr__(name)
+		else:
+			return delattr(self.win, name)
+
 
 class BaseWindow:
 	''' Common utility class for a screen subwindow '''
@@ -234,7 +299,7 @@ class BaseWindow:
 		self.width = width
 		self.top = top
 		self.left = left
-		self.win = self.parent.subwin(self.height, self.width, self.top, self.left)
+		self.win = CursesWinProxy(self.height, self.width, self.top, self.left, self.parent)
 		self.win.border(0)
 
 	def refresh(self):
@@ -354,8 +419,8 @@ class BaseDialog:
 		self.width = width
 		self.height = height
 
-		self.win = curses.newwin(self.height, self.width, self.top, self.left)
-		self.panel = curses.panel.new_panel(self.win)
+		self.win = CursesWinProxy(self.height, self.width, self.top, self.left)
+		self.panel = self.win.panel()
 		self.win.border(0)
 		self.win.addnstr(0, 2, self.title, width - 4)
 
@@ -379,10 +444,10 @@ class InputDialog(BaseDialog):
 		self.draw(width, height)
 		self.win.refresh()
 
-		ewin = curses.newwin(1, self.maxLen, self.top+1, self.left+1)
+		ewin = CursesWinProxy(1, self.maxLen, self.top+1, self.left+1)
 		ewin.refresh()
 
-		box = curses.textpad.Textbox(ewin)
+		box = ewin.textbox()
 
 		# Let the user edit until Ctrl-G is struck.
 		box.edit(lambda key: self.onKey(key))
