@@ -47,6 +47,9 @@ class UiBrain(brain.Brain):
 	def onStamChange(self, old, new):
 		self.updVitals()
 
+	def onSpeech(self, speech):
+		self.ui.showSpeech(speech)
+
 
 class Ui:
 	''' Handles the user interface '''
@@ -161,7 +164,9 @@ class Ui:
 			levelName = 'CRITICAL'
 		else:
 			levelName = "UNKNOWN{}".format(level)
-		self.lwin.updTitle("Verbosity: {}+ (press 'v' to cycle)".format(levelName))
+		##TODO: move help on a dedicated panel to be shown at startup
+		help = '(press: "v" to cycle; "enter" to talk)'
+		self.lwin.updTitle("Verbosity: {}+ {}".format(levelName, help))
 		self.lwin.refresh()
 
 	def formatVal(self, val, hex=False):
@@ -249,6 +254,8 @@ class Ui:
 		if key >= 0:
 			if key == ord('v'):
 				self.cycleLogLevel()
+			elif key == ord('\n'):
+				self.speak()
 			else:
 				self.log.warning('Unknown command "%s"', curses.keyname(key).decode('ascii'))
 		curses.flushinp()
@@ -269,6 +276,15 @@ class Ui:
 			newLevel = logging.INFO
 		self.logHandler.setLevel(newLevel)
 		self.updLogLvlDisplay()
+
+	def speak(self):
+		''' Asks input to the user and sends it as speech to the server '''
+		text = InputDialog(self.scr, 'Write down your message:', 70).edit()
+		self.cli.say(text)
+
+	def showSpeech(self, speech):
+		''' Called when speech has been received '''
+		self.lwin.append(str(speech))
 
 
 class CursesWinProxy:

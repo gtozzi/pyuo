@@ -345,6 +345,87 @@ class Target:
 		self.client.send(po)
 
 
+class Speech:
+	''' Represents something that has been spoken '''
+
+	# Constants for type
+	SAY       = 0x00
+	BROADCAST = 0x01
+	EMOTE     = 0x02
+	SYSTEM    = 0x06
+	MESSAGE   = 0x07
+	WHISPER   = 0x08
+	YELL      = 0x09
+	SPELL     = 0x0a
+	GUILD     = 0x0d
+	ALLIANCE  = 0x0e
+	COMMAND   = 0x0f
+
+	def __init__(self, client, pkt):
+		if isinstance(pkt, net.SendSpeechPacket):
+			self.unicode = False
+		elif isinstance(pkt, net.UnicodeSpeech):
+			self.unicode = True
+		else:
+			assert False
+
+		self.client = client
+
+		self.serial = pkt.serial
+		self.model = pkt.model
+		self.type = pkt.type
+		self.color = pkt.color
+		self.font = pkt.font
+		if self.unicode:
+			self.lang = pkt.lang
+		else:
+			self.lang = None
+		self.name = pkt.name
+		self.msg = pkt.msg
+
+	def typeName(self):
+		''' Returns type as string '''
+		if self.type == self.SAY:
+			return "Say"
+		elif self.type == self.BROADCAST:
+			return "Broadcast"
+		elif self.type == self.EMOTE:
+			return "Emote"
+		elif self.type == self.SYSTEM:
+			return "System"
+		elif self.type == self.MESSAGE:
+			return "Message"
+		elif self.type == self.WHISPER:
+			return "Whisper"
+		elif self.type == self.YELL:
+			return "Yell"
+		elif self.type == self.SPELL:
+			return "Spell"
+		elif self.type == self.GUILD:
+			return "Guild Chat"
+		elif self.type == self.ALLIANCE:
+			return "Alliance Chat"
+		elif self.type == self.COMMAND:
+			return "Command prompt"
+		return "Unknown message"
+
+	def __str__(self):
+		if self.type == self.SAY:
+			return "{}: {}".format(self.name, self.msg)
+		elif self.type == self.EMOTE:
+			return "{} {}".format(self.name, self.msg)
+		elif self.type == self.WHISPER:
+			return "{} whispers: {}".format(self.name, self.msg)
+		elif self.type == self.YELL:
+			return "{} yells: {}".format(self.name, self.msg)
+		return "[{}] {}: {}".format(self.typeName().upper(), self.name, self.msg)
+
+	def __repr__(self):
+		p = "u" if self.unicode else ""
+		return '{} from 0x{:02X} ({}): {}"{}"'.format(
+				self.typeName(), self.serial, self.name, p, self.msg)
+
+
 class Client:
 	''' The main client instance '''
 
@@ -701,36 +782,12 @@ class Client:
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
 
 			elif isinstance(pkt, net.SendSpeechPacket) or isinstance(pkt, net.UnicodeSpeech):
-				if pkt.type == 0x00:
-					what = "Say"
-				elif pkt.type == 0x01:
-					what = "Broadcast"
-				elif pkt.type == 0x02:
-					what = "Emote"
-				elif pkt.type == 0x06:
-					what = "System"
-				elif pkt.type == 0x07:
-					what = "Message"
-				elif pkt.type == 0x08:
-					what = "Whisper"
-				elif pkt.type == 0x09:
-					what = "Yell"
-				elif pkt.type == 0x0a:
-					what = "Spell"
-				elif pkt.type == 0x0d:
-					what = "Guild Chat"
-				elif pkt.type == 0x0e:
-					what = "Alliance Chat"
-				elif pkt.type == 0x0f:
-					what = "Command prompt"
-				else:
-					what = "Unknown message"
-
-				p = "u" if isinstance(pkt, net.UnicodeSpeech) else ""
+				speech = Speech(self, pkt)
 				if self.lc:
-					self.log.info('%s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
+					self.log.info(repr(speech))
 				else:
-					self.log.warn('EARLY %s from 0x%X (%s): %s"%s"', what, pkt.serial, pkt.name, p, pkt.msg)
+					self.log.warn('EARLY %s', repr(speech))
+				script.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
 
 			elif isinstance(pkt, net.TargetCursorPacket):
 				assert self.target is None

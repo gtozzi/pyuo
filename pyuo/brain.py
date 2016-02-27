@@ -91,6 +91,8 @@ class Brain(threading.Thread):
 				self.onManaChange(ev.old, ev.new)
 			elif ev.type == Event.EVT_STAM_CHANGED:
 				self.onStamChange(ev.old, ev.new)
+			elif ev.type == Event.EVT_SPEECH:
+				self.onSpeech(ev.speech)
 			else:
 				raise NotImplementedError("Unknown event {}",format(ev.type))
 
@@ -134,6 +136,10 @@ class Brain(threading.Thread):
 		''' Called when HP amount changes '''
 		print('STAM changed from {} to {}'.format(old, new))
 
+	def onSpeech(self, speech):
+		''' Called when somebody said something or on a sys or global chat message '''
+		print('SPEECH received: {}'.format(speech))
+
 
 class Event:
 	''' An event sent from the client '''
@@ -141,6 +147,7 @@ class Event:
 	EVT_HP_CHANGED = 1
 	EVT_MANA_CHANGED = 2
 	EVT_STAM_CHANGED = 3
+	EVT_SPEECH = 4
 
 	def __init__(self, type, **kwargs):
 		self.type = type
