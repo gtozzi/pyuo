@@ -1271,6 +1271,8 @@ class MegaClilocRevPacket(Packet):
 
 
 class ClilocMsgPacket(Packet):
+	''' A CliLoc message (predefined messages with an unique ID) '''
+
 	cmd = 0xc1
 
 	def __init__(self, buf):
@@ -1286,6 +1288,8 @@ class ClilocMsgPacket(Packet):
 		self.unicode_string = self.pb(self.length-48)
 
 class MobAttributesPacket(Packet):
+	''' Informs about a Mobile's attributes '''
+
 	cmd = 0x2d
 	length = 17
 
@@ -1298,6 +1302,8 @@ class MobAttributesPacket(Packet):
 		self.mana_current = self.ushort()
 		self.stam_max = self.ushort()
 		self.stam_current = self.ushort()
+
+
 class Ph:
 	''' Packet Handler '''
 
