@@ -1207,7 +1207,7 @@ class SendGumpDialogPacket(Packet):
 		self.texts = []
 		for i in range(0, textLines):
 			tlen = self.ushort() # In unicode 2-bytes chars
-			self.texts.append(self.string(tlen*2))
+			self.texts.append(self.ucstring(tlen*2))
 		self.uchar() # Trailing byte? TODO: check this
 
 
