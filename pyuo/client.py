@@ -707,6 +707,8 @@ class Client:
 					what = "Broadcast"
 				elif pkt.type == 0x02:
 					what = "Emote"
+				elif pkt.type == 0x06:
+					what = "System"
 				elif pkt.type == 0x07:
 					what = "Message"
 				elif pkt.type == 0x08:

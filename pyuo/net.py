@@ -1091,6 +1091,8 @@ class StatusBarInfoPacket(Packet):
 		self.maxhp = self.ushort()
 		self.canrename = self.uchar()
 		flag = self.uchar()
+		if flag == 0:
+			return
 		## Sex and race: 0 = Human Male, 1 = Human female, 2 = Elf Male, 3 = Elf Female
 		self.gener = self.uchar()
 		self.str = self.ushort()
@@ -1268,6 +1270,34 @@ class MegaClilocRevPacket(Packet):
 		self.revision = self.uint()
 
 
+class ClilocMsgPacket(Packet):
+	cmd = 0xc1
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.length = self.ushort()
+		self.id = self.uint()
+		self.body = self.ushort()
+		self.type = self.uchar()
+		self.hue = self.ushort()
+		self.font = self.ushort()
+		self.msg = self.uint()
+		self.speaker_name = self.string(30)
+		self.unicode_string = self.pb(self.length-48)
+
+class MobAttributesPacket(Packet):
+	cmd = 0x2d
+	length = 17
+
+	def __init__(self, buf):
+		super().__init__(buf)
+		self.serial = self.uint()
+		self.hits_max = self.ushort()
+		self.hits_current = self.ushort()
+		self.mana_max = self.ushort()
+		self.mana_current = self.ushort()
+		self.stam_max = self.ushort()
+		self.stam_current = self.ushort()
 class Ph:
 	''' Packet Handler '''
 
@@ -1319,6 +1349,8 @@ class Ph:
 	COMPRESSED_GUMP          = CompressedGumpPacket.cmd
 	TARGET_CURSOR            = TargetCursorPacket.cmd
 	MEGACLILOCREV            = MegaClilocRevPacket.cmd
+	CLILOCMSG                = ClilocMsgPacket.cmd
+	MOB_ATTRIBUTES           = MobAttributesPacket.cmd
 
 	HANDLERS = {
 		SERVER_LIST:              ServerListPacket,
@@ -1361,6 +1393,8 @@ class Ph:
 		COMPRESSED_GUMP:          CompressedGumpPacket,
 		TARGET_CURSOR:            TargetCursorPacket,
 		MEGACLILOCREV:            MegaClilocRevPacket,
+		CLILOCMSG:                ClilocMsgPacket,
+		MOB_ATTRIBUTES:           MobAttributesPacket,
 	}
 
 	@staticmethod
