@@ -36,7 +36,7 @@ class UiBrain(brain.Brain):
 		self.ui.updVitals(p.hp, p.maxhp, p.mana, p.maxmana, p.stam, p.maxstam)
 
 	def loop(self):
-		pass
+		self.ui.processInput()
 
 	def onHpChange(self, old, new):
 		self.updVitals()
@@ -51,11 +51,13 @@ class UiBrain(brain.Brain):
 class Ui:
 	''' Handles the user interface '''
 
-	def __init__(self, stdScreen, host, port, writeLog=False):
+	def __init__(self, stdScreen, host, port, writeLog=False, logLevel=logging.INFO):
 		# Main Screen and panel
 		self.scr = stdScreen
 		self.scr.clear()
 		self.scr.border(0)
+		self.scr.nodelay(True)
+		self.scr.keypad(1)
 		self.panel = curses.panel.new_panel(self.scr)
 
 		# Map window
@@ -74,9 +76,9 @@ class Ui:
 		rootLog = logging.getLogger()
 		rootLog.setLevel(logging.DEBUG)
 		compactFmt = logging.Formatter('%(name)s.%(levelname)s: %(message)s')
-		uiHandler = UiLogHandler(self.lwin)
-		uiHandler.setFormatter(compactFmt)
-		rootLog.addHandler(uiHandler)
+		self.logHandler = UiLogHandler(self.lwin, logLevel)
+		self.logHandler.setFormatter(compactFmt)
+		rootLog.addHandler(self.logHandler)
 		if writeLog:
 			verboseFmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 			logFile = os.path.join(
@@ -87,6 +89,7 @@ class Ui:
 			fileHandler.setFormatter(verboseFmt)
 			rootLog.addHandler(fileHandler)
 		self.log = logging.getLogger('ui')
+		self.updLogLvlDisplay()
 
 		# Login
 		while True:
@@ -101,8 +104,7 @@ class Ui:
 			try:
 				servers = self.cli.connect(host, port, user, pwd)
 			except client.LoginDeniedError as e:
-				self.swin.updStatus('login denied ({})'.format(e))
-				self.swin.refresh()
+				self.updStatus('login denied ({})'.format(e))
 			else:
 				break
 
@@ -144,6 +146,23 @@ class Ui:
 		self.log.info(text)
 		self.swin.updLabel('status', text)
 		self.swin.refresh()
+
+	def updLogLvlDisplay(self):
+		level = self.logHandler.getLevel()
+		if level == logging.DEBUG:
+			levelName = 'DEBUG'
+		elif level == logging.INFO:
+			levelName = 'INFO'
+		elif level == logging.WARNING:
+			levelName = 'WARNING'
+		elif level == logging.ERROR:
+			levelName = 'ERROR'
+		elif level == logging.CRITICAL:
+			levelName = 'CRITICAL'
+		else:
+			levelName = "UNKNOWN{}".format(level)
+		self.lwin.updTitle("Verbosity: {}+ (press 'v' to cycle)".format(levelName))
+		self.lwin.refresh()
 
 	def formatVal(self, val, hex=False):
 		if val is None:
@@ -224,6 +243,33 @@ class Ui:
 		self.mwin.updPosition(x, y, z, facing)
 		self.mwin.refresh()
 
+	def processInput(self):
+		''' Gets next character from the input, if any; discard the rest '''
+		key = self.scr.getch()
+		if key >= 0:
+			if key == ord('v'):
+				self.cycleLogLevel()
+			else:
+				self.log.warning('Unknown command "%s"', curses.keyname(key).decode('ascii'))
+		curses.flushinp()
+
+	def cycleLogLevel(self):
+		''' Move to next log level '''
+		level = self.logHandler.getLevel()
+		# Debug omitted: too noisy, breaks screen
+		if level == logging.INFO:
+			newLevel = logging.WARNING
+		elif level == logging.WARNING:
+			newLevel = logging.ERROR
+		elif level == logging.ERROR:
+			newLevel = logging.CRITICAL
+		elif level == logging.CRITICAL:
+			newLevel = logging.INFO
+		else:
+			newLevel = logging.INFO
+		self.logHandler.setLevel(newLevel)
+		self.updLogLvlDisplay()
+
 
 class CursesWinProxy:
 	''' Proxy class over curses window '''
@@ -290,17 +336,36 @@ class CursesWinProxy:
 			return delattr(self.win, name)
 
 
-class BaseWindow:
+class BaseWindowOrDialog:
+	''' Common utility class for a window or a dialog '''
+
+	def __init__(self, parent, title=None):
+		self.parent = parent
+		self.title = title
+
+	def border(self):
+		''' Redraw border (and title) '''
+		self.win.border(0)
+		if self.title is not None:
+			self.win.addnstr(0, 2, self.title, self.width - 4)
+
+	def updTitle(self, text):
+		''' Changes the window's displayed title '''
+		self.title = text
+		self.border()
+
+
+class BaseWindow(BaseWindowOrDialog):
 	''' Common utility class for a screen subwindow '''
 
-	def __init__(self, parent, height, width, top, left):
-		self.parent = parent
+	def __init__(self, parent, height, width, top, left, title=None):
+		super().__init__(parent, title)
 		self.height = height
 		self.width = width
 		self.top = top
 		self.left = left
 		self.win = CursesWinProxy(self.height, self.width, self.top, self.left, self.parent)
-		self.win.border(0)
+		self.border()
 
 	def refresh(self):
 		self.win.refresh()
@@ -321,8 +386,7 @@ class MapWindow(BaseWindow):
 		super().__init__(parent, self.HEIGHT, self.WIDTH, self.TOP, self.LEFT)
 
 	def updPosition(self, x, y, z, facing):
-		self.win.border(0)
-		self.win.addstr(0, 1, "{},{},{}".format(x,y,z))
+		self.updTitle("{},{},{}".format(x,y,z))
 
 		if facing == 0:
 			fchar = '↑'
@@ -398,18 +462,17 @@ class LogWindow(BaseWindow):
 		''' Appends a log line '''
 		self.lines.append(text)
 		self.win.clear()
-		self.win.border(0)
+		self.border()
 		for idx, l in enumerate(self.lines):
 			self.win.addnstr(idx+1, 2, l, self.width-2)
 		self.win.refresh()
 
 
-class BaseDialog:
+class BaseDialog(BaseWindowOrDialog):
 	''' Common utility class for a dialog '''
 
 	def __init__(self, parent, title):
-		self.parent = parent
-		self.title = title
+		super().__init__(parent, title)
 
 	def draw(self, width, height):
 		''' Draw the base window centered '''
@@ -421,8 +484,7 @@ class BaseDialog:
 
 		self.win = CursesWinProxy(self.height, self.width, self.top, self.left)
 		self.panel = self.win.panel()
-		self.win.border(0)
-		self.win.addnstr(0, 2, self.title, width - 4)
+		self.border()
 
 	def undraw(self):
 		self.win.clear()
@@ -511,17 +573,26 @@ class SelectDialog(BaseDialog):
 class UiLogHandler(logging.Handler):
 	''' Custom logging handler '''
 
-	def __init__(self, lwin):
+	def __init__(self, lwin, level):
 		super().__init__()
 		self.lwin = lwin
+		self.level = level
 
 	def emit(self, record):
-		if record.levelno == logging.DEBUG:
+		if record.levelno < self.level:
 			return
 
 		lines = self.format(record).splitlines()
 		for line in lines:
 			self.lwin.append(line)
+
+	def getLevel(self):
+		''' Gets current log level '''
+		return self.level
+
+	def setLevel(self, level):
+		''' Sets new log level '''
+		self.level = level
 
 
 if __name__ == '__main__':
@@ -534,7 +605,19 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('host', help="Server's IP address or host name")
 	parser.add_argument('port', type=int, help="Server's port")
-	parser.add_argument('-l', '--log', action='store_true', help="Write a verbose log")
+	parser.add_argument('-l', '--log', action='store_true',
+			help="Write a verbose log")
+	parser.add_argument('-v', '--verbose', action='store_true',
+			help="Increase initial verbosity")
+	parser.add_argument('-q', '--quiet', action='store_true',
+			help="Decrease initial verbosity")
 	args = parser.parse_args()
 
-	curses.wrapper(Ui, args.host, args.port, args.log)
+	if args.verbose:
+		logLevel = logging.INFO
+	elif args.quiet:
+		logLevel = logging.ERROR
+	else:
+		logLevel = logging.WARNING
+
+	curses.wrapper(Ui, args.host, args.port, args.log, logLevel)
