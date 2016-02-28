@@ -20,7 +20,20 @@ from pyuo import brain
 class Ui(brain.Brain):
 	''' Handles the user interface '''
 
+	colors = None
+
 	def __init__(self, stdScreen, host, port, writeLog=False, logLevel=logging.INFO):
+		for i in range(1, 8):
+			curses.init_pair(i, i, 0)
+		Ui.colors = {
+			'red': curses.color_pair(curses.COLOR_RED),
+			'green': curses.color_pair(curses.COLOR_GREEN),
+			'yellow': curses.color_pair(curses.COLOR_YELLOW),
+			'blue': curses.color_pair(curses.COLOR_BLUE),
+			'magenta': curses.color_pair(curses.COLOR_MAGENTA),
+			'cyan': curses.color_pair(curses.COLOR_CYAN),
+			'white': curses.color_pair(curses.COLOR_WHITE),
+		}
 		curses.curs_set(0)
 
 		# Main Screen and panel
@@ -76,6 +89,8 @@ class Ui(brain.Brain):
 				servers = cli.connect(host, port, user, pwd)
 			except client.LoginDeniedError as e:
 				self.updStatus('login denied ({})'.format(e))
+			except ConnectionRefusedError as e:
+				self.updStatus(str(e))
 			else:
 				break
 
@@ -112,7 +127,7 @@ class Ui(brain.Brain):
 		self.updVitals()
 		self.updMisc(p.status, p.war, p.notoriety)
 		self.updAspect(p.serial, p.graphic, p.color)
-		self.updPosition(p.x, p.y, p.z, p.facing)
+		self.updPosition(p.x, p.y, p.z, p.facing, p.notoriety)
 
 	def loop(self):
 		self.processInput()
@@ -203,19 +218,19 @@ class Ui(brain.Brain):
 
 		if notoriety is None:
 			notostr = '?'
-		elif notoriety == 1:
+		elif notoriety == client.Mobile.NOTO_INNOCENT:
 			notostr = 'innocent'
-		elif notoriety == 2:
+		elif notoriety == client.Mobile.NOTO_FRIEND:
 			notostr = 'friend'
-		elif notoriety == 3:
+		elif notoriety == client.Mobile.NOTO_ANIMAL:
 			notostr = 'animal'
-		elif notoriety == 4:
+		elif notoriety == client.Mobile.NOTO_CRIMINAL:
 			notostr = 'criminal'
-		elif notoriety == 5:
+		elif notoriety == client.Mobile.NOTO_ENEMY:
 			notostr = 'enemy'
-		elif notoriety == 6:
+		elif notoriety == client.Mobile.NOTO_MURDERER:
 			notostr = 'murderer'
-		elif notoriety == 7:
+		elif notoriety == client.Mobile.NOTO_INVUL:
 			notostr = 'invul'
 		else:
 			notostr = 'unknown'
@@ -224,12 +239,15 @@ class Ui(brain.Brain):
 		self.swin.updLabel('misc', text)
 		self.swin.refresh()
 
-	def updPosition(self, x, y, z, facing):
-		self.mwin.updPosition(x, y, z, facing)
+	def updPosition(self, x, y, z, facing, notoriety):
+		self.mwin.updPosition(x, y, z, facing, notoriety)
 		self.updMobiles()
 
 	def updMobiles(self):
-		mobiles = [x for x in self.client.objects.values() if isinstance(x,client.Mobile)]
+		mobiles = []
+		for obj in self.client.objects.values():
+			if isinstance(obj,client.Mobile) and obj.serial != self.player.serial:
+				mobiles.append(obj)
 		self.mwin.updMobiles(mobiles)
 		self.mwin.refresh()
 
@@ -294,12 +312,14 @@ class Ui(brain.Brain):
 
 	def onNotorietyChange(self, old, new):
 		self.updMisc()
+		p = self.client.player
+		self.updPosition(p.x, p.y, p.z, p.facing, p.notoriety)
 
 	def onSpeech(self, speech):
 		self.lwin.append(str(speech))
 
 	def onMovement(self, oldx, oldy, oldz, oldfacing, x, y, z, facing, ack):
-		self.updPosition(x, y, z, facing)
+		self.updPosition(x, y, z, facing, self.client.player.notoriety)
 
 	def onNewMobile(self, mobile):
 		self.updMobiles()
@@ -426,14 +446,16 @@ class MapWindow(BaseWindow):
 		self.pos = None
 		self.mpos = {}
 
-	def updPosition(self, x, y, z, facing):
-		newpos = {'x':x, 'y':y, 'z':z, 'facing':facing}
+	def updPosition(self, x, y, z, facing, notoriety):
+		newpos = {'x':x, 'y':y, 'z':z, 'facing':facing, 'noto':notoriety}
 		if self.pos == newpos:
 			return
 		self.pos = newpos
 
 		self.updTitle("{},{},{}".format(x,y,z))
-		self.win.addch(self.cx, self.cy, self.facingAsArrow(facing))
+		fa = self.facingAsArrow(facing)
+		color = self.notorietyColor(notoriety)
+		self.win.addch(self.cx, self.cy, self.facingAsArrow(facing), color)
 
 	def updMobiles(self, mobiles):
 		''' Redraw all mobiles from the given list '''
@@ -454,7 +476,9 @@ class MapWindow(BaseWindow):
 				mobpos = {'x':mob.x, 'y':mob.y, 'z':mob.z, 'facing':mob.facing,
 						'mapx':mapx, 'mapy':mapy}
 				self.mpos[mob.serial] = mobpos
-				self.win.addch(mapy, mapx, self.facingAsArrow(mob.facing))
+				fa = self.facingAsArrow(mob.facing)
+				color = self.notorietyColor(mob.notoriety)
+				self.win.addch(mapy, mapx, fa, color)
 			else:
 				self.log.info('Mobile out of map at {},{}'.format(relx, rely))
 
@@ -476,6 +500,23 @@ class MapWindow(BaseWindow):
 		if facing == 7:
 			return '↖'
 		return '?'
+
+	def notorietyColor(self, notoriety):
+		if notoriety == client.Mobile.NOTO_INNOCENT:
+			return Ui.colors['blue']
+		if notoriety == client.Mobile.NOTO_FRIEND:
+			return Ui.colors['green']
+		if notoriety == client.Mobile.NOTO_ANIMAL:
+			return Ui.colors['yellow']
+		if notoriety == client.Mobile.NOTO_CRIMINAL:
+			return Ui.colors['white']
+		if notoriety == client.Mobile.NOTO_ENEMY:
+			return Ui.colors['magenta']
+		if notoriety == client.Mobile.NOTO_MURDERER:
+			return Ui.colors['red']
+		if notoriety == client.Mobile.NOTO_INVUL:
+			return Ui.colors['cyan']
+		return 0
 
 
 class StatusWindow(BaseWindow):
@@ -703,4 +744,4 @@ if __name__ == '__main__':
 		type, value, tb = sys.exc_info()
 		msg = ''.join(traceback.format_exception(type, value, tb))
 		logging.critical(msg)
-		raise e
+		raise

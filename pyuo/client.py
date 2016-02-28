@@ -222,6 +222,15 @@ class Mobile(UOBject):
 	LAYER_BANKBOX     = 0x1d # 29. Contents of bankbox
 	LAYER_TRADE       = 0x1e # 30. Can be multiple of these, do not use directly.
 
+	# Constants for notoriety
+	NOTO_INNOCENT = 1
+	NOTO_FRIEND   = 2
+	NOTO_ANIMAL   = 3
+	NOTO_CRIMINAL = 4
+	NOTO_ENEMY    = 5
+	NOTO_MURDERER = 6
+	NOTO_INVUL    = 7
+
 	def __init__(self, client, pkt=None):
 		super().__init__(client)
 
