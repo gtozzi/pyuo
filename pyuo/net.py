@@ -218,7 +218,7 @@ class Ph:
 	DRAW_GAME_PLAYER         = packets.DrawGamePlayerPacket.cmd
 	OVERALL_LIGHT_LEVEL      = packets.OverallLightLevelPacket.cmd
 	SEND_SPEECH              = packets.SendSpeechPacket.cmd
-	UNICODE_SPEECH           = packets.UnicodeSpeech.cmd
+	UNICODE_SPEECH           = packets.UnicodeSpeechPacket.cmd
 	PLAY_MIDI                = packets.PlayMidiPacket.cmd
 	WAR_MODE                 = packets.WarModePacket.cmd
 	LOGIN_COMPLETE           = packets.LoginCompletePacket.cmd
@@ -262,7 +262,7 @@ class Ph:
 		DRAW_GAME_PLAYER:         packets.DrawGamePlayerPacket,
 		OVERALL_LIGHT_LEVEL:      packets.OverallLightLevelPacket,
 		SEND_SPEECH:              packets.SendSpeechPacket,
-		UNICODE_SPEECH:           packets.UnicodeSpeech,
+		UNICODE_SPEECH:           packets.UnicodeSpeechPacket,
 		PLAY_MIDI:                packets.PlayMidiPacket,
 		WAR_MODE:                 packets.WarModePacket,
 		LOGIN_COMPLETE:           packets.LoginCompletePacket,

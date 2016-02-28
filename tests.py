@@ -51,14 +51,17 @@ class TestSource(unittest.TestCase):
 
 			if not hasattr(c, 'cmd'):
 				# Consider classes without the 'cmd' attribute as base classes
-				self.assertTrue(base, "Base class {} found after concrete class")
+				self.assertTrue(base, 'Base class "{}" found after concrete class')
 				continue
 
 			base = False
 
 			if lastId is not None:
 				self.assertTrue(lastId < c.cmd,
-					"Class {}(0x{:02X}) defined after 0x{:02X}".format(name, c.cmd, lastId))
+					'Class "{}"(0x{:02X}) defined after 0x{:02X}'.format(name, c.cmd, lastId))
+
+			self.assertTrue(name.endswith('Packet'),
+					'Packet "{}" has invalid name: must end in "Packet"'.format(name))
 
 			lastId = c.cmd
 

@@ -357,7 +357,7 @@ class Speech:
 	def __init__(self, client, pkt):
 		if isinstance(pkt, packets.SendSpeechPacket):
 			self.unicode = False
-		elif isinstance(pkt, packets.UnicodeSpeech):
+		elif isinstance(pkt, packets.UnicodeSpeechPacket):
 			self.unicode = True
 		else:
 			assert False
@@ -780,7 +780,7 @@ class Client:
 				assert self.lc
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
 
-			elif isinstance(pkt, packets.SendSpeechPacket) or isinstance(pkt, packets.UnicodeSpeech):
+			elif isinstance(pkt, packets.SendSpeechPacket) or isinstance(pkt, packets.UnicodeSpeechPacket):
 				speech = Speech(self, pkt)
 				if self.lc:
 					self.log.info(repr(speech))

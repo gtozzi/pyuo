@@ -1071,7 +1071,7 @@ class UnicodeSpeechRequestPacket(Packet):
 		self.estring(self.text, len(self.text) + 1, True)
 
 
-class UnicodeSpeech(Packet):
+class UnicodeSpeechPacket(Packet):
 	''' Receive an unicode speech '''
 
 	cmd = 0xae
