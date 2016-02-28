@@ -237,13 +237,13 @@ class Ui(brain.Brain):
 			elif key == ord('\n'):
 				self.speak()
 			elif key == curses.KEY_DOWN:
-				self.move(Direction(Direction.S))
+				self.move(client.Direction(client.Direction.S))
 			elif key == curses.KEY_UP:
-				self.move(Direction(Direction.N))
+				self.move(client.Direction(client.Direction.N))
 			elif key == curses.KEY_LEFT:
-				self.move(Direction(Direction.W))
+				self.move(client.Direction(client.Direction.W))
 			elif key == curses.KEY_RIGHT:
-				self.move(Direction(Direction.E))
+				self.move(client.Direction(client.Direction.E))
 			else:
 				self.log.warning('Unknown command "%s"', curses.keyname(key).decode('ascii'))
 		curses.flushinp()
@@ -615,6 +615,7 @@ class UiLogHandler(logging.Handler):
 
 if __name__ == '__main__':
 	import argparse
+	import traceback
 
 	# Parse command line
 	parser = argparse.ArgumentParser()
@@ -635,4 +636,18 @@ if __name__ == '__main__':
 	else:
 		logLevel = logging.WARNING
 
-	curses.wrapper(Ui, args.host, args.port, args.log, logLevel)
+	# Redirect stderr so it doesn't interfere with curses
+	if args.log:
+		errFile = os.path.join(
+			os.path.dirname(os.path.abspath(__file__)),
+			os.path.splitext(os.path.basename(os.path.abspath(__file__)))[0]+'.err'
+		)
+		sys.stderr = open(errFile, 'wt')
+
+	try:
+		curses.wrapper(Ui, args.host, args.port, args.log, logLevel)
+	except Exception as e:
+		type, value, tb = sys.exc_info()
+		msg = ''.join(traceback.format_exception(type, value, tb))
+		logging.critical(msg)
+		raise e

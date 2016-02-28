@@ -55,9 +55,9 @@ class Brain:
 		''' This is the main Brain thread entry point, contains the main loop, internal '''
 
 		# Wait for client to start us, then initialize
-		self.log.debug('Waiting for client to start')
+		self.log.info('Waiting for client to start')
 		self.started.wait()
-		self.log.debug('Client started')
+		self.log.info('Client started')
 		self.player = self.client.player
 		self.objects = self.client.objects
 		self.init()
@@ -65,11 +65,13 @@ class Brain:
 		# Enter main loop
 		while True:
 			if not self.client.is_alive():
-				print('Oops! Client crashed.')
-				break
+				self.processEvents()
+				# Should not reach this point
+				self.log.critical("Client crashed and didn't tell me.")
+				raise RuntimeError("Client crashed and didn't tell me.")
 
 			if self.loop():
-				print('Main loop terminated.')
+				self.log.info('Main loop terminated.')
 				break
 
 			# Wait for events
@@ -97,6 +99,9 @@ class Brain:
 				self.onStamChange(ev.old, ev.new)
 			elif ev.type == Event.EVT_SPEECH:
 				self.onSpeech(ev.speech)
+			elif ev.type == Event.EVT_CLIENT_CRASH:
+				self.log.critical('Oops! Client crashed:', evt.exception)
+				raise RuntimeError('Oops! Client crashed')
 			else:
 				raise NotImplementedError("Unknown event {}",format(ev.type))
 
@@ -151,6 +156,8 @@ class Event:
 	EVT_MANA_CHANGED = 2
 	EVT_STAM_CHANGED = 3
 	EVT_SPEECH = 4
+
+	EVT_CLIENT_CRASH = 255
 
 	def __init__(self, type, **kwargs):
 		self.type = type

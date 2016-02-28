@@ -120,14 +120,29 @@ class Network:
 		self.log.debug('-> 0x%0.2X, %d bytes\n"%s"', raw[0], len(raw), raw)
 		self.sock.send(raw)
 
-	def recv(self, force=False):
-		''' Reads next packet from the server, waits until a full packet is received '''
+	def recv(self, force=False, blocking=True):
+		''' Reads next packet from the server
+		Always returns a full packet (waiting for full packet is always blocking)
+
+		@param force bool: Force wait, used internally
+		@param blocking bool: Set blocking mode
+		'''
+
+		self.sock.setblocking(blocking)
 
 		# Wait for a full packet
 		if len(self.buf) < 1 or force:
-			data = self.sock.recv(4096)
+			try:
+				data = self.sock.recv(4096)
+			except socket.error:
+				if not blocking:
+					return None
+				else:
+					raise
+
 			if not len(data):
 				raise RuntimeError("Disconnected");
+
 			self.buf += data
 
 		if self.compress:
@@ -151,11 +166,10 @@ class Network:
 
 		# Creates and instance of the packet from the buffer
 		cmd = raw[0]
-		try:
-			pktClass = packets.classes[cmd]
-		except KeyError:
+		if cmd not in packets.classes.keys():
 			raise NotImplementedError(
 					"Unknown packet 0x%0.2X, %d bytes\n%s" % (cmd, len(raw), raw))
+		pktClass = packets.classes[cmd]
 		pkt = pktClass()
 		pkt.decode(raw)
 		assert pkt.validated

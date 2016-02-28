@@ -485,6 +485,17 @@ class DrawGamePlayerPacket(Packet):
 		self.z = self.dschar()
 
 
+class MoveAck(Packet):
+	''' Acnowledge move request and update notoriety '''
+
+	cmd = 0x22
+	length = 3
+
+	def decodeChild(self):
+		self.sequence = self.duchar()
+		self.notoriety = self.duchar()
+
+
 class DrawContainerPacket(Packet):
 	''' Draws a container's gump '''
 

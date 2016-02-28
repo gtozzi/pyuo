@@ -19,6 +19,7 @@ along with this program; if not, write to the Free Software Foundation,
 Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 '''
 
+import sys
 import threading
 import struct
 import logging
@@ -496,7 +497,7 @@ class Client(threading.Thread):
 		## Locations sent with 0xa9 packets
 		self.locs = None
 		## Last move sequence number used
-		self.moveid = 0
+		self.moveid = -1
 		## Lock for incrementing moveId
 		self.moveidLock = threading.Lock()
 
@@ -629,11 +630,23 @@ class Client(threading.Thread):
 	@status('game')
 	@clientthread
 	def run(self):
+		''' Called by threading '''
+		try:
+			self.mainloop()
+		except Exception as e:
+			type, value, tb = sys.exc_info()
+			msg = ''.join(traceback.format_exception(type, value, tb))
+			self.log.critical(msg)
+			self.brain.event(brain.Event(brain.Event.EVT_CLIENT_CRASH, exception=e))
+
+	@status('game')
+	@clientthread
+	def mainloop(self):
 		''' Starts the endless game loop '''
 		self.ping = time.time() + self.PING_INTERVAL
 
 		while True:
-			pkt = self.receive()
+			pkt = self.receive(blocking=False)
 			self.send()
 
 			# Check if brain is alive
@@ -649,7 +662,10 @@ class Client(threading.Thread):
 				self.ping = time.time() + self.PING_INTERVAL
 
 			# Process packet
-			if isinstance(pkt, packets.LoginDeniedPacket):
+			if pkt is None:
+				time.sleep(0.01)
+
+			elif isinstance(pkt, packets.LoginDeniedPacket):
 				self.log.error('login denied')
 				raise LoginDeniedError(pkt.reason)
 
@@ -957,7 +973,7 @@ class Client(threading.Thread):
 
 		# Holding the lock until the packet is sent to avoid sending packets
 		# in the wrong order
-		with self.moveLock:
+		with self.moveidLock:
 			self.moveid += 1
 			if self.moveid > 0xff:
 				self.moveid = 1
@@ -1007,14 +1023,14 @@ class Client(threading.Thread):
 			self.net.send(data)
 
 	@clientthread
-	def receive(self, expect=None):
+	def receive(self, expect=None, blocking=True):
 		''' Receives next packet from the server
 		@param expect Packet/list: If given, throws an exception if packet
 		                           is not in the expected list/tuple
 		@return Packet
 		@throws UnexpectedPacketError
 		'''
-		pkt = self.net.recv()
+		pkt = self.net.recv(blocking=blocking)
 
 		if expect and not isinstance(expect, tuple) and not isinstance(expect, list):
 			expect = (expect, )
