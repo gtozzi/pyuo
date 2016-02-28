@@ -21,6 +21,8 @@ class Ui(brain.Brain):
 	''' Handles the user interface '''
 
 	def __init__(self, stdScreen, host, port, writeLog=False, logLevel=logging.INFO):
+		curses.curs_set(0)
+
 		# Main Screen and panel
 		self.scr = stdScreen
 		self.scr.clear()
@@ -224,6 +226,11 @@ class Ui(brain.Brain):
 
 	def updPosition(self, x, y, z, facing):
 		self.mwin.updPosition(x, y, z, facing)
+		self.updMobiles()
+
+	def updMobiles(self):
+		mobiles = [x for x in self.client.objects.values() if isinstance(x,client.Mobile)]
+		self.mwin.updMobiles(mobiles)
 		self.mwin.refresh()
 
 	def processInput(self):
@@ -293,6 +300,9 @@ class Ui(brain.Brain):
 
 	def onMovement(self, oldx, oldy, oldz, oldfacing, x, y, z, facing, ack):
 		self.updPosition(x, y, z, facing)
+
+	def onNewMobile(self, mobile):
+		self.updMobiles()
 
 
 class CursesWinProxy:
@@ -366,6 +376,7 @@ class BaseWindowOrDialog:
 	def __init__(self, parent, title=None):
 		self.parent = parent
 		self.title = title
+		self.log = logging.getLogger('window')
 
 	def border(self):
 		''' Redraw border (and title) '''
@@ -408,29 +419,63 @@ class MapWindow(BaseWindow):
 
 	def __init__(self, parent):
 		super().__init__(parent, self.HEIGHT, self.WIDTH, self.TOP, self.LEFT)
+		# Calculate center
+		self.cx = int((self.WIDTH - 1) / 2)
+		self.cy = int((self.HEIGHT - 1) / 2)
+		# Will store current position and other mobiles's positions
+		self.pos = None
+		self.mpos = {}
 
 	def updPosition(self, x, y, z, facing):
-		self.updTitle("{},{},{}".format(x,y,z))
+		newpos = {'x':x, 'y':y, 'z':z, 'facing':facing}
+		if self.pos == newpos:
+			return
+		self.pos = newpos
 
+		self.updTitle("{},{},{}".format(x,y,z))
+		self.win.addch(self.cx, self.cy, self.facingAsArrow(facing))
+
+	def updMobiles(self, mobiles):
+		''' Redraw all mobiles from the given list '''
+		for mob in mobiles:
+			relx = mob.x - self.pos['x']
+			rely = mob.y - self.pos['y']
+			mapx = self.cx + relx
+			mapy = self.cy + rely
+
+			# Delete old position if present
+			if mob.serial in self.mpos.keys():
+				oldpos = self.mpos[mob.serial]
+				del self.mpos[mob.serial]
+				self.win.addch(oldpos['mapy'], oldpos['mapx'], ' ')
+
+			if mapx > 1 and mapx < self.WIDTH-1 and mapy > 1 and mapy < self.HEIGHT-1:
+				# This is not out of screen, draw it
+				mobpos = {'x':mob.x, 'y':mob.y, 'z':mob.z, 'facing':mob.facing,
+						'mapx':mapx, 'mapy':mapy}
+				self.mpos[mob.serial] = mobpos
+				self.win.addch(mapy, mapx, self.facingAsArrow(mob.facing))
+			else:
+				self.log.info('Mobile out of map at {},{}'.format(relx, rely))
+
+	def facingAsArrow(self, facing):
 		if facing == 0:
-			fchar = '↑'
-		elif facing == 1:
-			fchar = '↗'
-		elif facing == 2:
-			fchar = '→'
-		elif facing == 3:
-			fchar = '↘'
-		elif facing == 4:
-			fchar = '↓'
-		elif facing == 5:
-			fchar = '↙'
-		elif facing == 6:
-			fchar = '←'
-		elif facing == 7:
-			fchar = '↖'
-		else:
-			fchar = '?'
-		self.win.addch(7, 7, fchar)
+			return '↑'
+		if facing == 1:
+			return '↗'
+		if facing == 2:
+			return '→'
+		if facing == 3:
+			return '↘'
+		if facing == 4:
+			return '↓'
+		if facing == 5:
+			return '↙'
+		if facing == 6:
+			return '←'
+		if facing == 7:
+			return '↖'
+		return '?'
 
 
 class StatusWindow(BaseWindow):
@@ -536,7 +581,9 @@ class InputDialog(BaseDialog):
 		box = ewin.textbox()
 
 		# Let the user edit until Ctrl-G is struck.
+		curses.curs_set(2)
 		box.edit(lambda key: self.onKey(key))
+		curses.curs_set(0)
 
 		res = box.gather().strip()
 

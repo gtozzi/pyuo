@@ -104,6 +104,8 @@ class Brain:
 			elif ev.type == Event.EVT_MOVED:
 				self.onMovement(ev.oldx, ev.oldy, ev.oldz, ev.oldfacing,
 						ev.x, ev.y, ev.z, ev.facing, ev.ack)
+			elif ev.type == Event.EVT_NEW_MOBILE:
+				self.onNewMobile(ev.mobile)
 			elif ev.type == Event.EVT_CLIENT_CRASH:
 				self.log.critical('Oops! Client crashed:', evt.exception)
 				raise RuntimeError('Oops! Client crashed')
@@ -159,6 +161,10 @@ class Brain:
 				'ack' if ack else 'rejected', oldx, oldy, odz,
 				oldfacing, x, y, z, facing))
 
+	def onNewMobile(self, mobile):
+		''' Called when a new mobile is in sight '''
+		print('NEW MOBILE: {}'.format(mobile))
+
 	def onSpeech(self, speech):
 		''' Called when somebody said something or on a sys or global chat message '''
 		print('SPEECH received: {}'.format(speech))
@@ -173,6 +179,7 @@ class Event:
 	EVT_SPEECH = 4
 	EVT_NOTORIETY = 5
 	EVT_MOVED = 6
+	EVT_NEW_MOBILE = 7
 
 	EVT_CLIENT_CRASH = 255
 

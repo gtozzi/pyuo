@@ -727,6 +727,7 @@ class Client(threading.Thread):
 					mob = Mobile(self, pkt)
 					self.objects[mob.serial] = mob
 					self.log.info("New mobile: %s", mob)
+					self.brain.event(brain.Event(brain.Event.EVT_NEW_MOBILE, mobile=mob))
 					# Auto single click for new mobiles
 					self.singleClick(mob)
 
