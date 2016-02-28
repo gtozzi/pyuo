@@ -149,10 +149,8 @@ class Network:
 			try:
 				raw, size = self.decompress(self.buf)
 			except NoFullPacketError:
-				# Not enough data to make a full packet. Sleep for a while and try again
-				# TODO: definitely handle this better
-				self.log.warn("No full packet. Waiting... (%d bytes in buffer)", len(self.buf))
-				time.sleep(1)
+				# Not enough data to make a full packet. Try again
+				self.log.debug("No full packet. Waiting... (%d bytes in buffer)", len(self.buf))
 				return self.recv(True)
 		else:
 			raw = self.buf
