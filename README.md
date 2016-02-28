@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/gtozzi/pyuo.svg?branch=master)](https://travis-ci.org/gtozzi/pyuo)
+
 # pyuo
 A text-only UO client written in Python
 Copyright (C) 2015-2016 Gabriele Tozzi
