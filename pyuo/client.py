@@ -46,6 +46,17 @@ class status:
 		return wrapper
 
 
+def clientthread(f):
+	''' Decorator, checks that method is run in the client thread only unless initing '''
+	def wrapper(client, *args, **kwargs):
+		if status == 'game':
+			mythread = threading.current_thread()
+			if mythread is not client:
+				raise ThreadError("This must run in client thread only, currently in {}".format(mythread))
+		return f(client, *args, **kwargs)
+	return wrapper
+
+
 def logincomplete(f):
 	''' Decorator, check that login procedure is complete '''
 	def wrapper(client, *args, **kwargs):
@@ -439,8 +450,14 @@ class Direction:
 		self.id = id
 
 
-class Client:
-	''' The main client instance '''
+class Client(threading.Thread):
+	''' The main client instance and thread
+
+	Runs in a mixed threading mode: first initialize the client in the main
+	thread, then call run() to move the client to a seperate thread.
+	You can call the methods that are not decorated with @clientthread from
+	any thread.
+	'''
 
 	## Minimum interval between two pings
 	PING_INTERVAL = 30
@@ -450,6 +467,15 @@ class Client:
 	LANG = 'ENU'
 
 	def __init__(self):
+		super().__init__()
+		# Change the thread name to better identify
+		self.name = 'Client' + self.name
+
+		## Send queue
+		self.sendqueue = []
+		## Lock for the send queue
+		self.sendqueueLock = threading.Lock()
+
 		## Dict info about last server connected to {ip, port, user, pass}
 		self.server = None
 		## Current client status, one of:
@@ -517,13 +543,16 @@ class Client:
 		self.net = net.Network(self.server['ip'], self.server['port'])
 
 		# Send IP as key (will not use encryption)
-		self.send(ipaddress.ip_address(self.server['ip']).packed)
+		self.queue(ipaddress.ip_address(self.server['ip']).packed)
 
 		# Send account login request
 		self.log.info('logging in')
 		po = packets.LoginRequestPacket()
 		po.fill(self.server['user'], self.server['pass'])
-		self.send(po)
+		self.queue(po)
+
+		# Flush send buffer
+		self.send()
 
 		# Get servers list
 		pkt = self.receive((packets.ServerListPacket, packets.LoginDeniedPacket))
@@ -540,7 +569,8 @@ class Client:
 	def selectServer(self, idx):
 		''' Selects the game server with the given idx '''
 		self.log.info('selecting server %d', idx)
-		self.send(struct.pack('>BH', 0xa0, idx))
+		self.queue(struct.pack('>BH', 0xa0, idx))
+		self.send()
 
 		pkt = self.receive(packets.ConnectToGameServerPacket)
 		ip = '.'.join(map(str, pkt.ip))
@@ -552,13 +582,16 @@ class Client:
 
 		# Send key
 		bkey = struct.pack('>I', pkt.key)
-		self.send(bkey)
+		self.queue(bkey)
 
 		# Send login
 		self.log.info('logging in')
 		po = packets.GameServerLoginPacket()
 		po.fill(pkt.key, self.server['user'], self.server['pass'])
-		self.send(po)
+		self.queue(po)
+
+		# Flush send buffer
+		self.send()
 
 		# From now on, server will use compression
 		self.net.compress = True
@@ -581,25 +614,30 @@ class Client:
 		self.log.info('selecting character #%d %s', idx, name)
 		po = packets.LoginCharacterPacket()
 		po.fill(name, idx)
-		self.send(po)
+		self.queue(po)
+		self.send()
 
 		self.status = 'game'
 
 	@status('game')
-	def play(self, script):
-		''' Starts the endless game loop
-		@script Thread: The brain thread will be started once login is completed
-		'''
-		self.ping = time.time() + self.PING_INTERVAL
+	def start(self, ai):
+		if not isinstance(ai, brain.Brain):
+			raise RuntimeError("Unknown brain, expecting a Brain instance, got {}".format(type(ai)))
+		self.brain = ai
+		super().start()
 
-		if not isinstance(script, brain.Brain):
-			raise RuntimeError("Unknown brain, expecting a Brain instance, got {}".format(type(brain)))
+	@status('game')
+	@clientthread
+	def run(self):
+		''' Starts the endless game loop '''
+		self.ping = time.time() + self.PING_INTERVAL
 
 		while True:
 			pkt = self.receive()
+			self.send()
 
 			# Check if brain is alive
-			if script.started and not script.is_alive():
+			if not threading.main_thread().is_alive():
 				self.log.info("Brain died, terminating")
 				break
 
@@ -607,7 +645,7 @@ class Client:
 			if self.lc and self.ping < time.time():
 				po = packets.PingPacket()
 				po.fill(0)
-				self.send(po)
+				self.queue(po)
 				self.ping = time.time() + self.PING_INTERVAL
 
 			# Process packet
@@ -732,7 +770,7 @@ class Client:
 					mob.maxhp = pkt.max
 					mob.hp = pkt.cur
 					self.log.info("0x%X's HP: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				script.event(brain.Event(brain.Event.EVT_HP_CHANGED, old=old, new=self.player.hp))
+				self.brain.event(brain.Event(brain.Event.EVT_HP_CHANGED, old=old, new=self.player.hp))
 
 			elif isinstance(pkt, packets.UpdateManaPacket):
 				assert self.lc
@@ -746,7 +784,7 @@ class Client:
 					mob.maxmana = pkt.max
 					mob.mana = pkt.cur
 					self.log.info("0x%X's MANA: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				script.event(brain.Event(brain.Event.EVT_MANA_CHANGED, old=old, new=self.player.mana))
+				self.brain.event(brain.Event(brain.Event.EVT_MANA_CHANGED, old=old, new=self.player.mana))
 
 			elif isinstance(pkt, packets.UpdateStaminaPacket):
 				assert self.lc
@@ -760,7 +798,7 @@ class Client:
 					mob.maxstam = pkt.max
 					mob.stam = pkt.cur
 					self.log.info("0x%X's STAM: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				script.event(brain.Event(brain.Event.EVT_STAM_CHANGED, old=old, new=self.player.stam))
+				self.brain.event(brain.Event(brain.Event.EVT_STAM_CHANGED, old=old, new=self.player.stam))
 
 			elif isinstance(pkt, packets.GeneralInfoPacket):
 				if pkt.sub == packets.GeneralInfoPacket.SUB_CURSORMAP:
@@ -789,7 +827,7 @@ class Client:
 					self.log.info(repr(speech))
 				else:
 					self.log.warn('EARLY %s', repr(speech))
-				script.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
+				self.brain.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
 
 			elif isinstance(pkt, packets.TargetCursorPacket):
 				assert self.target is None
@@ -816,7 +854,7 @@ class Client:
 				self.singleClick(self.player)
 
 				# Start the brain
-				script.start(self)
+				self.brain.started.set()
 
 			elif isinstance(pkt, packets.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
@@ -850,49 +888,49 @@ class Client:
 		''' Sends client version to server, should not send it twice '''
 		po = packets.ClientVersionPacket()
 		po.fill(self.VERSION)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def sendLanguage(self):
 		''' Sends client lamguage to server, should not send it twice '''
 		po = packets.GeneralInfoPacket()
 		po.fill(po.SUB_LANG, self.LANG)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def sendClientType(self):
 		''' Sends client type flag, should be sent only once at login '''
 		po = packets.GeneralInfoPacket()
 		po.fill(po.SUB_LOGIN)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def requestSkills(self):
 		''' Requests skill info (0x3a packet) '''
 		po = packets.GetPlayerStatusPacket()
 		po.fill(po.TYP_SKILLS, self.player.serial)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def requestStatus(self):
 		''' Requests basic status (0x11 packet) '''
 		po = packets.GetPlayerStatusPacket()
 		po.fill(po.TYP_BASE, self.player.serial)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def singleClick(self, obj):
 		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
 		po = packets.SingleClickPacket()
 		po.fill(obj if type(obj) == int else obj.serial)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def doubleClick(self, obj):
 		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
 		po = packets.DoubleClickPacket()
 		po.fill(obj if type(obj) == int else obj.serial)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def say(self, text, font=3, color=0):
@@ -903,7 +941,7 @@ class Client:
 		'''
 		po = packets.UnicodeSpeechRequestPacket()
 		po.fill(po.TYP_NORMAL, self.LANG, text, color, font)
-		self.send(po)
+		self.queue(po)
 
 	@logincomplete
 	def move(self, dir):
@@ -919,14 +957,13 @@ class Client:
 
 		# Holding the lock until the packet is sent to avoid sending packets
 		# in the wrong order
-		self.moveidLock.acquire()
-		self.moveid += 1
-		if self.moveid > 0xff:
-			self.moveid = 1
-		po = packets.MoveRequestPacket()
-		po.fill(dir.id, self.moveid)
-		self.send(po)
-		self.moveidLock.release()
+		with self.moveLock:
+			self.moveid += 1
+			if self.moveid > 0xff:
+				self.moveid = 1
+			po = packets.MoveRequestPacket()
+			po.fill(dir.id, self.moveid)
+			self.queue(po)
 
 	@logincomplete
 	def waitForTarget(self, timeout=None):
@@ -954,10 +991,22 @@ class Client:
 				nextWarn = wait + 5.0
 		return True
 
-	def send(self, data):
-		''' Sends a raw packet to the Server '''
-		self.net.send(data)
+	def queue(self, data):
+		''' Puts a packet in the queue to be sent asap '''
+		with self.sendqueueLock:
+			self.sendqueue.append(data)
 
+	@clientthread
+	def send(self):
+		''' Sends all packets in the queue '''
+		with self.sendqueueLock:
+			queue = self.sendqueue
+			self.sendqueue = []
+
+		for data in queue:
+			self.net.send(data)
+
+	@clientthread
 	def receive(self, expect=None):
 		''' Receives next packet from the server
 		@param expect Packet/list: If given, throws an exception if packet
@@ -984,6 +1033,10 @@ class Client:
 
 
 class StatusError(Exception):
+	pass
+
+
+class ThreadError(Exception):
 	pass
 
 

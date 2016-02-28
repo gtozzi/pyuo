@@ -17,41 +17,7 @@ from pyuo import client
 from pyuo import brain
 
 
-class UiBrain(brain.Brain):
-	''' Handles client interaction '''
-
-	def __init__(self, ui):
-		super().__init__()
-		self.ui = ui
-
-	def init(self):
-		self.updVitals()
-		p = self.client.player
-		self.ui.updMisc(p.status, p.war, p.notoriety)
-		self.ui.updAspect(p.serial, p.graphic, p.color)
-		self.ui.updPosition(p.x, p.y, p.z, p.facing)
-
-	def updVitals(self):
-		p = self.client.player
-		self.ui.updVitals(p.hp, p.maxhp, p.mana, p.maxmana, p.stam, p.maxstam)
-
-	def loop(self):
-		self.ui.processInput()
-
-	def onHpChange(self, old, new):
-		self.updVitals()
-
-	def onManaChange(self, old, new):
-		self.updVitals()
-
-	def onStamChange(self, old, new):
-		self.updVitals()
-
-	def onSpeech(self, speech):
-		self.ui.showSpeech(speech)
-
-
-class Ui:
+class Ui(brain.Brain):
 	''' Handles the user interface '''
 
 	def __init__(self, stdScreen, host, port, writeLog=False, logLevel=logging.INFO):
@@ -103,9 +69,9 @@ class Ui:
 			# Connect to server
 			self.updStatus('logging in {}:{}'.format(host,port))
 			self.refreshAll()
-			self.cli = client.Client()
+			cli = client.Client()
 			try:
-				servers = self.cli.connect(host, port, user, pwd)
+				servers = cli.connect(host, port, user, pwd)
 			except client.LoginDeniedError as e:
 				self.updStatus('login denied ({})'.format(e))
 			else:
@@ -117,26 +83,37 @@ class Ui:
 		self.log.debug(servers)
 		serverList = [ i['name'] for i in servers ]
 		idx = SelectDialog(self.scr, 'Select a server', serverList, 30, 5).select()
-		server = servers[idx]
+		self.server = servers[idx]
 
-		self.updStatus('selecting server {}'.format(server['name']))
+		self.updStatus('selecting server {}'.format(self.server['name']))
 		self.refreshAll()
 
 		# Select character
-		chars = self.cli.selectServer(server['idx'])
+		chars = cli.selectServer(self.server['idx'])
 		self.log.debug(chars)
 		charList = [ i['name'] for i in chars ]
 		idx = SelectDialog(self.scr, 'Select a character', charList, 30, 5).select()
-		char = chars[idx]
+		self.char = chars[idx]
 
-		self.updStatus('selecting character {}'.format(char['name']))
+		self.updStatus('selecting character {}'.format(self.char['name']))
 		self.refreshAll()
 
 		# Start brain
-		self.cli.selectCharacter(char['name'], idx)
-		self.updStatus('playing {}@{}'.format(char['name'], server['name']))
-		brain = UiBrain(self)
-		self.cli.play(brain)
+		cli.selectCharacter(self.char['name'], idx)
+		self.updStatus('entering Britannia...')
+		super().__init__(cli)
+
+	def init(self):
+		self.timeout = 0.1
+		p = self.client.player
+		self.updStatus('playing {}@{}'.format(self.char['name'], self.server['name']))
+		self.updVitals()
+		self.updMisc(p.status, p.war, p.notoriety)
+		self.updAspect(p.serial, p.graphic, p.color)
+		self.updPosition(p.x, p.y, p.z, p.facing)
+
+	def loop(self):
+		self.processInput()
 
 	def refreshAll(self):
 		self.scr.noutrefresh()
@@ -176,10 +153,11 @@ class Ui:
 			return "0x{:02X}".format(val) if hex else str(val)
 		return str(val)
 
-	def updVitals(self, hp, maxhp, mana, maxmana, stam, maxstam):
+	def updVitals(self):
+		p = self.client.player
 		fv = self.formatVal
 		text = "hp {}/{}, mana {}/{}, stam {}/{}".format(
-				fv(hp), fv(maxhp), fv(mana), fv(maxmana), fv(stam), fv(maxstam))
+				fv(p.hp), fv(p.maxhp), fv(p.mana), fv(p.maxmana), fv(p.stam), fv(p.maxstam))
 		self.swin.updLabel('vitals', text)
 		self.swin.refresh()
 
@@ -249,7 +227,9 @@ class Ui:
 		self.mwin.refresh()
 
 	def processInput(self):
-		''' Gets next character from the input, if any; discard the rest '''
+		''' Gets next character from the input, if any; discard the rest
+		@return True if any input has been processed
+		'''
 		key = self.scr.getch()
 		if key >= 0:
 			if key == ord('v'):
@@ -288,15 +268,25 @@ class Ui:
 	def speak(self):
 		''' Asks input to the user and sends it as speech to the server '''
 		text = InputDialog(self.scr, 'Write down your message:', 70).edit()
-		self.cli.say(text)
-
-	def showSpeech(self, speech):
-		''' Called when speech has been received '''
-		self.lwin.append(str(speech))
+		self.client.say(text)
 
 	def move(self, dir):
 		''' Sends move request to the server '''
-		self.cli.move(dir)
+		self.client.move(dir)
+
+	# Client events ------------------------------------------------------------
+
+	def onHpChange(self, old, new):
+		self.updVitals()
+
+	def onManaChange(self, old, new):
+		self.updVitals()
+
+	def onStamChange(self, old, new):
+		self.updVitals()
+
+	def onSpeech(self, speech):
+		self.lwin.append(str(speech))
 
 
 class CursesWinProxy:
@@ -625,9 +615,6 @@ class UiLogHandler(logging.Handler):
 
 if __name__ == '__main__':
 	import argparse
-
-	# Configure debug output
-	#logging.basicConfig(level=logging.DEBUG)
 
 	# Parse command line
 	parser = argparse.ArgumentParser()

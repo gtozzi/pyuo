@@ -67,4 +67,4 @@ if __name__ == '__main__':
 	servers = c.connect(lconf.get('ip'), lconf.getint('port'), lconf.get('user'), lconf.get('pass'))
 	chars = c.selectServer(lconf.getint('serveridx'))
 	c.selectCharacter(lconf.get('charname'), lconf.getint('charidx'))
-	c.play(MyBrain())
+	MyBrain(c)

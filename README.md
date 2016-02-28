@@ -51,5 +51,4 @@ if __name__ == '__main__':
     # Select first character
     client.selectCharacter(chars[0]['name'], 0)
     # Finally start the main ai loop and enter it
-    client.play(MyBrain())
-```
+    MyBrain(client)

@@ -20,45 +20,51 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 '''
 
 import threading
+import logging
 import time
 import collections
 
 
-class Brain(threading.Thread):
-	''' This is the Brain for the client, the code who takes decisions '''
+class Brain:
+	''' This is the Brain for the client, the code that takes decisions
 
-	def __init__(self):
-		''' Initialize the object, internal '''
-		self.started = False
+	Usually runs in the main thread, starts the client thread.
+	'''
+
+	def __init__(self, client):
+		''' Initialize the object, must provide a connected client instance
+		@param client Client: a client instance, already connected, will start it
+		'''
+		self.log = logging.getLogger('brain')
+		self.started = threading.Event()
 		self.events = collections.deque()
 		self.eventsLock = threading.Lock()
 		## Client reference
-		self.client = None
+		self.client = client
 		## Reference to current player
 		self.player = None
 		## Reference to list of known objects
 		self.objects = None
 		## Default timeout while waiting for events
 		self.timeout = 5
-		super().__init__()
 
-	def start(self, client):
-		''' Prepare the script for startup, internal '''
-		self.client = client
-		self.player = self.client.player
-		self.objects = self.client.objects
-		self.started = True
-		super().start()
+		client.start(self)
+		self.run()
 
 	def run(self):
 		''' This is the main Brain thread entry point, contains the main loop, internal '''
 
+		# Wait for client to start us, then initialize
+		self.log.debug('Waiting for client to start')
+		self.started.wait()
+		self.log.debug('Client started')
+		self.player = self.client.player
+		self.objects = self.client.objects
 		self.init()
 
-		main = threading.main_thread()
-
+		# Enter main loop
 		while True:
-			if not main.is_alive():
+			if not self.client.is_alive():
 				print('Oops! Client crashed.')
 				break
 
@@ -78,12 +84,10 @@ class Brain(threading.Thread):
 	def processEvents(self):
 		''' Process event queue, internal '''
 		while True:
-			self.eventsLock.acquire()
-			if not len(self.events):
-				self.eventsLock.release()
-				return
-			ev = self.events.popleft()
-			self.eventsLock.release()
+			with self.eventsLock:
+				if not len(self.events):
+					return
+				ev = self.events.popleft()
 
 			if ev.type == Event.EVT_HP_CHANGED:
 				self.onHpChange(ev.old, ev.new)
@@ -97,13 +101,12 @@ class Brain(threading.Thread):
 				raise NotImplementedError("Unknown event {}",format(ev.type))
 
 	def event(self, ev):
-		''' Internal function, injects a single event '''
+		''' Internal function, injects a single event, called from the client thread '''
 		if not isinstance(ev, Event):
 			raise RuntimeError("Unknown event, expecting an Event instance, got {}".format(type(ev)))
 
-		self.eventsLock.acquire()
-		self.events.append(ev)
-		self.eventsLock.release()
+		with self.eventsLock:
+			self.events.append(ev)
 
 	def setTimeout(self, timeout):
 		''' Sets the new timeout in seconds for the main loop '''
