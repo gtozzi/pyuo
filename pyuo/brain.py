@@ -99,6 +99,11 @@ class Brain:
 				self.onStamChange(ev.old, ev.new)
 			elif ev.type == Event.EVT_SPEECH:
 				self.onSpeech(ev.speech)
+			elif ev.type == Event.EVT_NOTORIETY:
+				self.onNotorietyChange(ev.old, ev.new)
+			elif ev.type == Event.EVT_MOVED:
+				self.onMovement(ev.oldx, ev.oldy, ev.oldz, ev.oldfacing,
+						ev.x, ev.y, ev.z, ev.facing, ev.ack)
 			elif ev.type == Event.EVT_CLIENT_CRASH:
 				self.log.critical('Oops! Client crashed:', evt.exception)
 				raise RuntimeError('Oops! Client crashed')
@@ -144,6 +149,16 @@ class Brain:
 		''' Called when HP amount changes '''
 		print('STAM changed from {} to {}'.format(old, new))
 
+	def onNotorietyChange(self, old, new):
+		''' Called when notoriety changes '''
+		print('NOTORIETY changed from {} to {}'.format(old, new))
+
+	def onMovement(self, oldx, oldy, oldz, oldfacing, x, y, z, facing, ack):
+		''' Called when movement has been confirmed '''
+		print('MOVEMENT {} {},{},{}.{} -> {},{},{}.{}'.format(
+				'ack' if ack else 'rejected', oldx, oldy, odz,
+				oldfacing, x, y, z, facing))
+
 	def onSpeech(self, speech):
 		''' Called when somebody said something or on a sys or global chat message '''
 		print('SPEECH received: {}'.format(speech))
@@ -156,6 +171,8 @@ class Event:
 	EVT_MANA_CHANGED = 2
 	EVT_STAM_CHANGED = 3
 	EVT_SPEECH = 4
+	EVT_NOTORIETY = 5
+	EVT_MOVED = 6
 
 	EVT_CLIENT_CRASH = 255
 

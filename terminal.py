@@ -285,8 +285,14 @@ class Ui(brain.Brain):
 	def onStamChange(self, old, new):
 		self.updVitals()
 
+	def onNotorietyChange(self, old, new):
+		self.updMisc()
+
 	def onSpeech(self, speech):
 		self.lwin.append(str(speech))
+
+	def onMovement(self, oldx, oldy, oldz, oldfacing, x, y, z, facing, ack):
+		self.updPosition(x, y, z, facing)
 
 
 class CursesWinProxy:

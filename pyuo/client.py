@@ -20,6 +20,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 '''
 
 import sys
+import collections
 import threading
 import struct
 import logging
@@ -499,7 +500,9 @@ class Client(threading.Thread):
 		## Last move sequence number used
 		self.moveid = -1
 		## Lock for incrementing moveId
-		self.moveidLock = threading.Lock()
+		self.moveLock = threading.Lock()
+		## Unacknowledged moves
+		self.unmoves = collections.deque()
 
 		## Reference to player, character instance
 		self.player = None
@@ -872,6 +875,73 @@ class Client(threading.Thread):
 				# Start the brain
 				self.brain.started.set()
 
+			elif isinstance(pkt, packets.MoveAckPacket) or isinstance(pkt, packets.MoveRejectPacket):
+				if isinstance(pkt, packets.MoveAckPacket):
+					ack = True
+				else:
+					ack = False
+
+				with self.moveLock:
+					# Match first move packet to be ackowledged
+					mpkt = self.unmoves.popleft()
+					assert pkt.sequence == pkt.sequence
+
+					if not ack:
+						# Reset sequence counter after a reject
+						self.moveid = -1
+
+				oldx = self.player.x
+				oldy = self.player.y
+				oldz = self.player.z
+				oldfacing = self.player.facing
+
+				if ack:
+					# Need to calculate (guess) the new position, since this
+					# packets does not cointain position information
+					if mpkt.direction == self.player.facing:
+						# Moving in front of me, doing one step
+						if mpkt.direction == Direction.N:
+							self.player.y -= 1
+						elif mpkt.direction == Direction.NE:
+							self.player.y -= 1
+							self.player.x += 1
+						elif mpkt.direction == Direction.E:
+							self.player.x += 1
+						elif mpkt.direction == Direction.SE:
+							self.player.y += 1
+							self.player.x += 1
+						elif mpkt.direction == Direction.S:
+							self.player.y += 1
+						elif mpkt.direction == Direction.SW:
+							self.player.y += 1
+							self.player.x -= 1
+						elif mpkt.direction == Direction.W:
+							self.player.x -= 1
+						elif mpkt.direction == Direction.NW:
+							self.player.y -= 1
+							self.player.x -= 1
+					else:
+						# Changing direction, just change facing
+						self.player.facing = mpkt.direction
+				else:
+					# The reject packet has the position so it's easier
+					self.player.x = pkt.x
+					self.player.y = pkt.y
+					self.player.z = pkt.z
+					self.player.facing = pkt.direction
+
+				self.brain.event(brain.Event(brain.Event.EVT_MOVED,
+						oldx=oldx, oldy=oldy, oldz=oldz, oldfacing=oldfacing,
+						x=self.player.x, y=self.player.y, z=self.player.z,
+						facing=self.player.facing, ack=ack))
+
+				# Handle the notoriety
+				if ack and self.player.notoriety != pkt.notoriety:
+					old = self.player.notoriety
+					self.player.notoriety = pkt.notoriety
+					self.brain.event(brain.Event(brain.Event.EVT_NOTORIETY,
+							old=old, new=self.player.notoriety))
+
 			elif isinstance(pkt, packets.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
 
@@ -973,12 +1043,13 @@ class Client(threading.Thread):
 
 		# Holding the lock until the packet is sent to avoid sending packets
 		# in the wrong order
-		with self.moveidLock:
+		with self.moveLock:
 			self.moveid += 1
 			if self.moveid > 0xff:
 				self.moveid = 1
 			po = packets.MoveRequestPacket()
 			po.fill(dir.id, self.moveid)
+			self.unmoves.append(po)
 			self.queue(po)
 
 	@logincomplete

@@ -485,7 +485,21 @@ class DrawGamePlayerPacket(Packet):
 		self.z = self.dschar()
 
 
-class MoveAck(Packet):
+class MoveRejectPacket(Packet):
+	''' Reject move request and update position '''
+
+	cmd = 0x21
+	length = 8
+
+	def decodeChild(self):
+		self.sequence = self.duchar()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.direction = self.dschar()
+		self.z = self.dschar()
+
+
+class MoveAckPacket(Packet):
 	''' Acnowledge move request and update notoriety '''
 
 	cmd = 0x22

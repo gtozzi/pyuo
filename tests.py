@@ -49,7 +49,7 @@ class TestSource(unittest.TestCase):
 		for name in classNames:
 			c = classInfo[name]
 
-			if c not in packets.classes:
+			if c not in packets.classes.values():
 				self.assertTrue(base, 'Base class "{}" found after concrete class')
 				continue
 
