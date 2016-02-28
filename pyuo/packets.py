@@ -272,6 +272,26 @@ class SerialOnlyPacket(Packet):
 ################################################################################
 
 
+class MoveRequestPacket(Packet):
+	''' Requests movement '''
+
+	cmd = 0x02
+	length = 7
+
+	def fill(self, direction, sequence):
+		'''
+		@param direction int: The direction code (0-7)
+		@param sequence int: The sequence code (0-255)
+		'''
+		self.direction = direction
+		self.sequence = sequence
+
+	def encodeChild(self):
+		self.euchar(self.direction)
+		self.euchar(self.sequence)
+		self.euint(0) #Fastwalk prevention key
+
+
 class DoubleClickPacket(SerialOnlyPacket):
 	''' Notify server of a doble click on something '''
 

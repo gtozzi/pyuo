@@ -19,6 +19,7 @@ along with this program; if not, write to the Free Software Foundation,
 Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 '''
 
+import threading
 import struct
 import logging
 import socket
@@ -470,6 +471,8 @@ class Client:
 		self.locs = None
 		## Last move sequence number used
 		self.moveid = 0
+		## Lock for incrementing moveId
+		self.moveidLock = threading.Lock()
 
 		## Reference to player, character instance
 		self.player = None
@@ -904,7 +907,7 @@ class Client:
 
 	@logincomplete
 	def move(self, dir):
-		''' Request the server to move on step in the given direction
+		''' Request the server to move one step in the given direction
 		@param dir Direction: instance od the requested direction or int
 		'''
 		if isinstance(dir, Direction):
@@ -913,7 +916,17 @@ class Client:
 			dir = Direction(dir)
 		else:
 			raise ValueError('dir must be Direction or int')
-		raise NotImplementedError()
+
+		# Holding the lock until the packet is sent to avoid sending packets
+		# in the wrong order
+		self.moveidLock.acquire()
+		self.moveid += 1
+		if self.moveid > 0xff:
+			self.moveid = 1
+		po = packets.MoveRequestPacket()
+		po.fill(dir.id, self.moveid)
+		self.send(po)
+		self.moveidLock.release()
 
 	@logincomplete
 	def waitForTarget(self, timeout=None):

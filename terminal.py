@@ -165,7 +165,7 @@ class Ui:
 		else:
 			levelName = "UNKNOWN{}".format(level)
 		##TODO: move help on a dedicated panel to be shown at startup
-		help = '(press: "v" to cycle; "enter" to talk)'
+		help = '(press: "v" to cycle; "enter" to talk, arrows to move)'
 		self.lwin.updTitle("Verbosity: {}+ {}".format(levelName, help))
 		self.lwin.refresh()
 
@@ -256,6 +256,14 @@ class Ui:
 				self.cycleLogLevel()
 			elif key == ord('\n'):
 				self.speak()
+			elif key == curses.KEY_DOWN:
+				self.move(Direction(Direction.S))
+			elif key == curses.KEY_UP:
+				self.move(Direction(Direction.N))
+			elif key == curses.KEY_LEFT:
+				self.move(Direction(Direction.W))
+			elif key == curses.KEY_RIGHT:
+				self.move(Direction(Direction.E))
 			else:
 				self.log.warning('Unknown command "%s"', curses.keyname(key).decode('ascii'))
 		curses.flushinp()
@@ -285,6 +293,10 @@ class Ui:
 	def showSpeech(self, speech):
 		''' Called when speech has been received '''
 		self.lwin.append(str(speech))
+
+	def move(self, dir):
+		''' Sends move request to the server '''
+		self.cli.move(dir)
 
 
 class CursesWinProxy:
