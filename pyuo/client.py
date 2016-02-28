@@ -27,6 +27,7 @@ import time
 import traceback
 
 from . import net
+from . import packets
 from . import brain
 
 
@@ -94,7 +95,7 @@ class Item(UOBject):
 
 	def update(self, pkt):
 		''' Update from packet '''
-		if not isinstance(pkt, net.ObjectInfoPacket):
+		if not isinstance(pkt, packets.ObjectInfoPacket):
 			raise ValueError("Expecting a DrawObjectPacket")
 		self.serial = pkt.serial
 		self.graphic = pkt.graphic
@@ -140,7 +141,7 @@ class Container(Item):
 		''' Adds an item to container, from packet or dictionary '''
 		if type(pkt) == dict:
 			it = pkt
-		elif isinstance(pkt, net.AddItemToContainerPacket):
+		elif isinstance(pkt, packets.AddItemToContainerPacket):
 			it = pkt.__dict__
 		else:
 			raise ValueError("Expecting a AddItem(s)ToContainerPacket")
@@ -251,7 +252,7 @@ class Mobile(UOBject):
 
 	def update(self, pkt):
 		''' Update from packet '''
-		if not isinstance(pkt, net.UpdatePlayerPacket) and not isinstance(pkt, net.DrawObjectPacket):
+		if not isinstance(pkt, packets.UpdatePlayerPacket) and not isinstance(pkt, packets.DrawObjectPacket):
 			raise ValueError("Expecting an UpdatePlayerPacket or DrawObjectPacket")
 		self.serial = pkt.serial
 		self.graphic = pkt.graphic
@@ -264,7 +265,7 @@ class Mobile(UOBject):
 		self.notoriety = pkt.notoriety
 
 		# Handle equip
-		if isinstance(pkt, net.DrawObjectPacket):
+		if isinstance(pkt, packets.DrawObjectPacket):
 			self.equip = {}
 			for eq in pkt.equip:
 				serial = eq['serial']
@@ -320,7 +321,7 @@ class Target:
 	HELPFUL = 2
 
 	def __init__(self, client, pkt):
-		assert isinstance(pkt, net.TargetCursorPacket)
+		assert isinstance(pkt, packets.TargetCursorPacket)
 
 		self.client = client
 
@@ -362,9 +363,9 @@ class Speech:
 	COMMAND   = 0x0f
 
 	def __init__(self, client, pkt):
-		if isinstance(pkt, net.SendSpeechPacket):
+		if isinstance(pkt, packets.SendSpeechPacket):
 			self.unicode = False
-		elif isinstance(pkt, net.UnicodeSpeech):
+		elif isinstance(pkt, packets.UnicodeSpeech):
 			self.unicode = True
 		else:
 			assert False
@@ -512,7 +513,7 @@ class Client:
 
 		# Get servers list
 		pkt = self.receive((net.Ph.SERVER_LIST, net.Ph.LOGIN_DENIED))
-		if isinstance(pkt, net.LoginDeniedPacket):
+		if isinstance(pkt, packets.LoginDeniedPacket):
 			self.log.error('login denied')
 			raise LoginDeniedError(pkt.reason)
 
@@ -609,14 +610,14 @@ class Client:
 				self.ping = time.time() + self.PING_INTERVAL
 
 			# Process packet
-			if isinstance(pkt, net.LoginDeniedPacket):
+			if isinstance(pkt, packets.LoginDeniedPacket):
 				self.log.error('login denied')
 				raise LoginDeniedError(pkt.reason)
 
-			elif isinstance(pkt, net.PingPacket):
+			elif isinstance(pkt, packets.PingPacket):
 				self.log.debug("Server sent a ping back")
 
-			elif isinstance(pkt, net.CharLocaleBodyPacket):
+			elif isinstance(pkt, packets.CharLocaleBodyPacket):
 				assert not self.lc
 
 				assert self.player is None
@@ -646,7 +647,7 @@ class Client:
 				self.log.info("You are 0x%X and your graphic is 0x%X", self.player.serial, self.player.graphic)
 				self.log.info("Position: %d,%d,%d facing %d", self.player.x, self.player.y, self.player.z, self.player.facing)
 
-			elif isinstance(pkt, net.DrawGamePlayerPacket):
+			elif isinstance(pkt, packets.DrawGamePlayerPacket):
 				assert self.player.serial == pkt.serial
 				assert self.player.graphic == pkt.graphic
 				assert self.player.x == pkt.x
@@ -659,7 +660,7 @@ class Client:
 
 				self.log.info("Your color is %d and your status is 0x%X", self.player.color, self.player.status)
 
-			elif isinstance(pkt, net.DrawObjectPacket):
+			elif isinstance(pkt, packets.DrawObjectPacket):
 				assert self.lc
 				if pkt.serial in self.objects.keys():
 					self.objects[pkt.serial].update(pkt)
@@ -671,7 +672,7 @@ class Client:
 					# Auto single click for new mobiles
 					self.singleClick(mob)
 
-			elif isinstance(pkt, net.ObjectInfoPacket):
+			elif isinstance(pkt, packets.ObjectInfoPacket):
 				assert self.lc
 				if pkt.serial in self.objects.keys():
 					self.objects[pkt.serial].update(pkt)
@@ -681,12 +682,12 @@ class Client:
 					self.log.info("New item: %s", item)
 					self.objects[item.serial] = item
 
-			elif isinstance(pkt, net.UpdatePlayerPacket):
+			elif isinstance(pkt, packets.UpdatePlayerPacket):
 				assert self.lc
 				self.objects[pkt.serial].update(pkt)
 				self.log.info("Updated mobile: %s", self.objects[pkt.serial])
 
-			elif isinstance(pkt, net.DeleteObjectPacket):
+			elif isinstance(pkt, packets.DeleteObjectPacket):
 				assert self.lc
 				if pkt.serial in self.objects:
 					del self.objects[pkt.serial]
@@ -694,14 +695,14 @@ class Client:
 				else:
 					self.log.warn("Server requested to delete 0x%X but i don't know it", pkt.serial)
 
-			elif isinstance(pkt, net.AddItemToContainerPacket):
+			elif isinstance(pkt, packets.AddItemToContainerPacket):
 				assert self.lc
 				if isinstance(self.objects[pkt.container], Container):
 					self.objects[pkt.container].addItem(pkt)
 				else:
 					self.log.warn("Ignoring add item 0x%X to non-container 0x%X", pkt.serial, pkt.container)
 
-			elif isinstance(pkt, net.AddItemsToContainerPacket):
+			elif isinstance(pkt, packets.AddItemsToContainerPacket):
 				assert self.lc
 				for it in pkt.items:
 					if isinstance(self.objects[it['container']], Container):
@@ -709,16 +710,16 @@ class Client:
 					else:
 						self.log.warn("Ignoring add item 0x%X to non-container 0x%X", it['serial'], it['container'])
 
-			elif isinstance(pkt, net.WarModePacket):
+			elif isinstance(pkt, packets.WarModePacket):
 				assert self.player.war is None
 				self.player.war = pkt.war
 
-			elif isinstance(pkt, net.AllowAttackPacket):
+			elif isinstance(pkt, packets.AllowAttackPacket):
 				assert self.lc
 				self.player.target = pkt.serial
 				self.log.info("Target set to 0x%X", self.player.target)
 
-			elif isinstance(pkt, net.UpdateHealthPacket):
+			elif isinstance(pkt, packets.UpdateHealthPacket):
 				assert self.lc
 				old = self.player.hp
 				if self.player.serial == pkt.serial:
@@ -732,7 +733,7 @@ class Client:
 					self.log.info("0x%X's HP: %d/%d", pkt.serial, pkt.cur, pkt.max)
 				script.event(brain.Event(brain.Event.EVT_HP_CHANGED, old=old, new=self.player.hp))
 
-			elif isinstance(pkt, net.UpdateManaPacket):
+			elif isinstance(pkt, packets.UpdateManaPacket):
 				assert self.lc
 				old = self.player.mana
 				if self.player.serial == pkt.serial:
@@ -746,7 +747,7 @@ class Client:
 					self.log.info("0x%X's MANA: %d/%d", pkt.serial, pkt.cur, pkt.max)
 				script.event(brain.Event(brain.Event.EVT_MANA_CHANGED, old=old, new=self.player.mana))
 
-			elif isinstance(pkt, net.UpdateStaminaPacket):
+			elif isinstance(pkt, packets.UpdateStaminaPacket):
 				assert self.lc
 				old = self.player.stam
 				if self.player.serial == pkt.serial:
@@ -760,28 +761,28 @@ class Client:
 					self.log.info("0x%X's STAM: %d/%d", pkt.serial, pkt.cur, pkt.max)
 				script.event(brain.Event(brain.Event.EVT_STAM_CHANGED, old=old, new=self.player.stam))
 
-			elif isinstance(pkt, net.GeneralInfoPacket):
-				if pkt.sub == net.GeneralInfoPacket.SUB_CURSORMAP:
+			elif isinstance(pkt, packets.GeneralInfoPacket):
+				if pkt.sub == packets.GeneralInfoPacket.SUB_CURSORMAP:
 					self.cursor = pkt.cursor
-				elif pkt.sub == net.GeneralInfoPacket.SUB_MAPDIFF:
+				elif pkt.sub == packets.GeneralInfoPacket.SUB_MAPDIFF:
 					pass
-				elif pkt.sub == net.GeneralInfoPacket.SUB_PARTY:
+				elif pkt.sub == packets.GeneralInfoPacket.SUB_PARTY:
 					self.log.info("Ignoring party system data")
 				else:
 					self.log.warn("Unhandled GeneralInfo subpacket 0x%X", pkt.sub)
 
-			elif isinstance(pkt, net.DrawContainerPacket):
+			elif isinstance(pkt, packets.DrawContainerPacket):
 				cont = self.objects[pkt.serial]
 				assert isinstance(cont, Item)
 				if not isinstance(cont, Container):
 					# Upgrade the item to a Container
 					cont.upgradeToContainer()
 
-			elif isinstance(pkt, net.TipWindowPacket):
+			elif isinstance(pkt, packets.TipWindowPacket):
 				assert self.lc
 				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
 
-			elif isinstance(pkt, net.SendSpeechPacket) or isinstance(pkt, net.UnicodeSpeech):
+			elif isinstance(pkt, packets.SendSpeechPacket) or isinstance(pkt, packets.UnicodeSpeech):
 				speech = Speech(self, pkt)
 				if self.lc:
 					self.log.info(repr(speech))
@@ -789,16 +790,16 @@ class Client:
 					self.log.warn('EARLY %s', repr(speech))
 				script.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
 
-			elif isinstance(pkt, net.TargetCursorPacket):
+			elif isinstance(pkt, packets.TargetCursorPacket):
 				assert self.target is None
 				self.target = Target(self, pkt)
 
-			elif isinstance(pkt, net.CharacterAnimationPacket):
+			elif isinstance(pkt, packets.CharacterAnimationPacket):
 				assert self.lc
 				# Just check that the object exists
 				self.objects[pkt.serial]
 
-			elif isinstance(pkt, net.LoginCompletePacket):
+			elif isinstance(pkt, packets.LoginCompletePacket):
 				assert not self.lc
 				assert self.player is not None
 				self.lc = True
@@ -816,28 +817,28 @@ class Client:
 				# Start the brain
 				script.start(self)
 
-			elif isinstance(pkt, net.Unk32Packet):
+			elif isinstance(pkt, packets.Unk32Packet):
 				self.log.warn("Unknown 0x32 packet received")
 
-			elif isinstance(pkt, net.ControlAnimationPacket):
+			elif isinstance(pkt, packets.ControlAnimationPacket):
 				assert self.lc
 				self.log.info('Ignoring animation packet')
 
-			elif isinstance(pkt, net.GraphicalEffectPacket):
+			elif isinstance(pkt, packets.GraphicalEffectPacket):
 				assert self.lc
 				self.log.info('Graphical effect packet')
 
-			elif isinstance(pkt, net.PlaySoundPacket):
+			elif isinstance(pkt, packets.PlaySoundPacket):
 				assert self.lc
 				self.log.info('Ignoring sound packet')
 
-			elif isinstance(pkt, net.SetWeatherPacket):
+			elif isinstance(pkt, packets.SetWeatherPacket):
 				self.log.info('Ignoring weather packet')
 
-			elif isinstance(pkt, net.OverallLightLevelPacket):
+			elif isinstance(pkt, packets.OverallLightLevelPacket):
 				self.log.info('Ignoring light level packet')
 
-			elif isinstance(pkt, net.SeasonInfoPacket):
+			elif isinstance(pkt, packets.SeasonInfoPacket):
 				self.log.info('Ignoring season packet')
 
 			else:
