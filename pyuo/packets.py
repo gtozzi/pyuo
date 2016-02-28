@@ -21,6 +21,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 import struct
 import logging
+import ipaddress
 import zlib
 
 
@@ -29,20 +30,76 @@ import zlib
 ################################################################################
 
 
-class Packet:
+class Packet():
 	''' Base class for packets '''
 
-	def __init__(self, buf):
+	def __init__(self):
+		assert self.cmd
 		self.log = logging.getLogger('packet')
+		self.validated = False
+
+	def fill(self):
+		''' Fills the packet with the given data, sort of delayed constructor '''
+		raise NotImplementedError('This packet cannot be sent')
+
+	def decode(self, buf):
+		''' Parses the data from the given buffer into this packet instance
+		@see decodeChild
+		@param buf binary: The binary buffer, as received from server
+		'''
 		self.buf = buf
 		self.readCount = 0
-		self.validated = False
-		cmd = self.uchar()
+		cmd = self.duchar()
 		if cmd != self.cmd:
 			raise RuntimeError("Invalid data for this packet {} <> {}".format(cmd, self.cmd))
 
-	def pb(self, num):
-		''' Returns the given number of characters from the gibven buffer '''
+		self.decodeChild()
+
+		# Validate the process
+		if self.length != self.readCount:
+			self.log.debug(self.__dict__)
+			raise RuntimeError("Len mismatch on incomingpacket 0x{:02x} ({} <> {})".format(
+					self.cmd, self.length, self.readCount))
+		self.validated = True
+
+	def decodeChild(self):
+		''' Derived classes must ovveride this method to do the decoding '''
+		raise NotImplementedError('this method must be overridden')
+
+	def encode(self):
+		''' Encodes the data into a buffer and returns it
+		@see encodeChild
+		@return binary: The binary buffer, ready to be sent to server
+		'''
+		self.buf = b''
+		self.euchar(self.cmd)
+
+		# Used by self.eulen()
+		self.lenIdx = None
+
+		self.encodeChild()
+
+		# Replace length if needed
+		if self.lenIdx is not None:
+			self.buf = self.buf[:self.lenIdx] + struct.pack('>H', len(self.buf)) + self.buf[self.lenIdx+2:]
+		del self.lenIdx
+
+		# Validate the process
+		if self.length != len(self.buf):
+			raise RuntimeError("Len mismatch on outgoing packet 0x{:02x} ({} <> {})".format(
+					self.cmd, self.length, len(self.buf)))
+		self.validated = True
+
+		return self.buf
+
+	def encodeChild(self):
+		''' Derived classes must ovveride this method to do the decoding '''
+		raise NotImplementedError('this method must be overridden')
+
+	# Decode methods -----------------------------------------------------------
+
+	def rpb(self, num):
+		''' Returns the given number of characters from the receive buffer '''
 		if num > len(self.buf):
 			raise EOFError("Trying to read {} bytes, but only {} left in buffer".format(num, len(self.buf)))
 		self.readCount += num
@@ -50,42 +107,90 @@ class Packet:
 		self.buf = self.buf[num:]
 		return ret
 
-	def uchar(self):
-		''' Returns next unsngned byte from the buffer '''
-		return struct.unpack('B', self.pb(1))[0]
+	def duchar(self):
+		''' Returns next unsngned byte from the receive buffer '''
+		return struct.unpack('B', self.rpb(1))[0]
 
-	def schar(self):
-		''' Returns next signed byte from the buffer '''
-		return struct.unpack('b', self.pb(1))[0]
+	def dschar(self):
+		''' Returns next signed byte from the receive buffer '''
+		return struct.unpack('b', self.rpb(1))[0]
 
-	def ushort(self):
-		''' Returns next unsigned short from the buffer '''
-		return struct.unpack('>H', self.pb(2))[0]
+	def dushort(self):
+		''' Returns next unsigned short from the receive buffer '''
+		return struct.unpack('>H', self.rpb(2))[0]
 
-	def uint(self):
-		''' Returns next unsigned int from the buffer '''
-		return struct.unpack('>I', self.pb(4))[0]
+	def duint(self):
+		''' Returns next unsigned int from the receive buffer '''
+		return struct.unpack('>I', self.rpb(4))[0]
 
-	def string(self, length):
-		''' Returns next string of the given length from the buffer '''
-		return self.varStr(self.pb(length))
+	def dstring(self, length):
+		''' Returns next string of the given length from the receive buffer '''
+		return self.varStr(self.rpb(length))
 
-	def ucstring(self, length):
-		''' Returns next unicode string of the given length from the buffer '''
+	def ducstring(self, length):
+		''' Returns next unicode string of the given length from the receive buffer '''
 		if length % 2:
 			raise ValueError('Length must be a multiple of 2')
-		return self.varUStr(self.pb(length))
+		return self.varUStr(self.rpb(length))
 
-	def ip(self):
-		''' Returns next string ip address from the buffer '''
-		return struct.unpack('BBBB', self.pb(4))
+	def dip(self):
+		''' Returns next string ip address from the receive buffer '''
+		return struct.unpack('BBBB', self.rpb(4))
 
-	def validate(self):
-		''' Do validations things, but be called at end of init '''
-		if( self.length != self.readCount ):
-			self.log.debug(self.__dict__)
-			raise RuntimeError("Len mismatch on packet 0x{:02x} ({} <> {})".format(self.cmd, self.length, self.readCount))
-		self.validated = True
+	# Encode methods -----------------------------------------------------------
+
+	def eulen(self):
+		''' Special value: will place there an ushort containing packet length '''
+		self.lenIdx = len(self.buf)
+		self.eushort(0)
+
+	def euchar(self, val):
+		''' Add an unsigned char (byte) to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 255:
+			raise ValueError("Byte {} out of range".format(val))
+		self.buf += struct.pack('B', val)
+
+	def eschar(self, val):
+		''' Add a signed char (byte) to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 255:
+			raise ValueError("Byte {} out of range".format(val))
+		self.buf += struct.pack('b', val)
+
+	def eushort(self, val):
+		''' Adds an unsigned short to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 0xffff:
+			raise ValueError("UShort {} out of range".format(val))
+		self.buf += struct.pack('>H', val)
+
+	def euint(self, val):
+		''' Adds and unsigned int to the packet '''
+		if not isinstance(val, int):
+			raise TypeError("Expected int, got {}".format(type(val)))
+		if val < 0 or val > 0xffffffff:
+			raise ValueError("UInt {} out of range".format(val))
+		self.buf += struct.pack('>I', val)
+
+	def estring(self, val, length, unicode=False):
+		''' Adds a string to the packet '''
+		if not isinstance(val, str):
+			raise TypeError("Expected str, got {}".format(type(val)))
+		if len(val) > length:
+			raise ValueError('String "{}" too long'.format(val))
+		self.buf += self.fixStr(val, length, unicode)
+
+	def eip(self, val):
+		''' Adds an ip to the packet '''
+		if not isinstance(val, str):
+			raise TypeError("Expected str, got {}".format(type(val)))
+		self.buf += ipaddress.ip_address(val).packed
+
+	# Utility methods ----------------------------------------------------------
 
 	@staticmethod
 	def fixStr(string, length, unicode=False):
@@ -136,86 +241,115 @@ class UpdateVitalPacket(Packet):
 
 	length = 9
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.max = self.ushort()
-		self.cur = self.ushort()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.max = self.dushort()
+		self.cur = self.dushort()
+
+
+class SerialOnlyPacket(Packet):
+	''' Utility class for a simple packet carrying only a serial '''
+
+	length = 5
+
+	def fill(self, serial):
+		'''
+		@param serial int: The object serial
+		'''
+		self.serial = serial
+
+	def encodeChild(self):
+		self.euint(self.serial)
+
+	def decodeChild(self):
+		self.serial = self.duint()
 
 
 ################################################################################
 # Packets for here on, sorted by ID/cmd
 ################################################################################
 
+
+class DoubleClickPacket(SerialOnlyPacket):
+	''' Notify server of a doble click on something '''
+
+	cmd = 0x06
+
+
+class SingleClickPacket(SerialOnlyPacket):
+	''' Notify server of a single click on something '''
+
+	cmd = 0x09
+
+
 class StatusBarInfoPacket(Packet):
 	''' Sends status bar info '''
 
 	cmd = 0x11
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.name = self.string(30)
-		self.hp = self.ushort()
-		self.maxhp = self.ushort()
-		self.canrename = self.uchar()
-		flag = self.uchar()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.name = self.dstring(30)
+		self.hp = self.dushort()
+		self.maxhp = self.dushort()
+		self.canrename = self.duchar()
+		flag = self.duchar()
 		if flag == 0:
 			return
 		## Sex and race: 0 = Human Male, 1 = Human female, 2 = Elf Male, 3 = Elf Female
-		self.gener = self.uchar()
-		self.str = self.ushort()
-		self.dex = self.ushort()
-		self.int = self.ushort()
-		self.stam = self.ushort()
-		self.maxstam = self.ushort()
-		self.mana = self.ushort()
-		self.maxmana = self.ushort()
-		self.gold = self.uint()
-		self.ar = self.ushort()
-		self.weight = self.ushort()
+		self.gener = self.duchar()
+		self.str = self.dushort()
+		self.dex = self.dushort()
+		self.int = self.dushort()
+		self.stam = self.dushort()
+		self.maxstam = self.dushort()
+		self.mana = self.dushort()
+		self.maxmana = self.dushort()
+		self.gold = self.duint()
+		self.ar = self.dushort()
+		self.weight = self.dushort()
 		if flag >= 5:
-			self.maxweight = self.ushort()
+			self.maxweight = self.dushort()
 			## Race: 1 = Human, 2 = Elf, 3 = Gargoyle
-			self.race = self.uchar()
+			self.race = self.duchar()
 		if flag >= 3:
-			self.statcap = self.ushort()
-			self.followers = self.uchar()
-			self.maxfollowers = self.uchar()
+			self.statcap = self.dushort()
+			self.followers = self.duchar()
+			self.maxfollowers = self.duchar()
 		if flag >= 4:
-			self.rfire = self.ushort()
-			self.rcold = self.ushort()
-			self.rpoison = self.ushort()
-			self.renergy = self.ushort()
-			self.luck = self.ushort()
-			self.mindmg = self.ushort()
-			self.maxdmg = self.ushort()
-			self.tithing = self.uint()
+			self.rfire = self.dushort()
+			self.rcold = self.dushort()
+			self.rpoison = self.dushort()
+			self.renergy = self.dushort()
+			self.luck = self.dushort()
+			self.mindmg = self.dushort()
+			self.maxdmg = self.dushort()
+			self.tithing = self.duint()
 		if flag >= 6:
-			self.hitinc = self.ushort()
-			self.swinginc = self.ushort()
-			self.dmginc = self.ushort()
-			self.lrc = self.ushort()
-			self.hpregen = self.ushort()
-			self.stamregen = self.ushort()
-			self.manaregen = self.ushort()
-			self.reflectphysical = self.ushort()
-			self.enhancepot = self.ushort()
-			self.definc = self.ushort()
-			self.spellinc = self.ushort()
-			self.fcr = self.ushort()
-			self.fc = self.ushort()
-			self.lmc = self.ushort()
-			self.strinc = self.ushort()
-			self.dexinc = self.ushort()
-			self.intinc = self.ushort()
-			self.hpinc = self.ushort()
-			self.staminc = self.ushort()
-			self.manainc = self.ushort()
-			self.maxhpinc = self.ushort()
-			self.maxstaminc = self.ushort()
-			self.maxmanainc = self.ushort()
+			self.hitinc = self.dushort()
+			self.swinginc = self.dushort()
+			self.dmginc = self.dushort()
+			self.lrc = self.dushort()
+			self.hpregen = self.dushort()
+			self.stamregen = self.dushort()
+			self.manaregen = self.dushort()
+			self.reflectphysical = self.dushort()
+			self.enhancepot = self.dushort()
+			self.definc = self.dushort()
+			self.spellinc = self.dushort()
+			self.fcr = self.dushort()
+			self.fc = self.dushort()
+			self.lmc = self.dushort()
+			self.strinc = self.dushort()
+			self.dexinc = self.dushort()
+			self.intinc = self.dushort()
+			self.hpinc = self.dushort()
+			self.staminc = self.dushort()
+			self.manainc = self.dushort()
+			self.maxhpinc = self.dushort()
+			self.maxstaminc = self.dushort()
+			self.maxmanainc = self.dushort()
 
 
 class ObjectInfoPacket(Packet):
@@ -223,30 +357,29 @@ class ObjectInfoPacket(Packet):
 
 	cmd = 0x1a
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.graphic = self.ushort()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.graphic = self.dushort()
 		if self.serial & 0x80000000:
-			self.count = self.ushort()
+			self.count = self.dushort()
 		else:
 			self.count = None
 		if self.graphic & 0x8000:
-			self.graphic += self.uchar()
-		x = self.ushort()
-		y = self.ushort()
+			self.graphic += self.duchar()
+		x = self.dushort()
+		y = self.dushort()
 		if x & 0x8000:
-			self.facing = self.schar()
+			self.facing = self.dschar()
 		else:
 			self.facing = None
-		self.z = self.schar()
+		self.z = self.dschar()
 		if y & 0x8000:
-			self.color = self.ushort()
+			self.color = self.dushort()
 		else:
 			self.color = None
 		if y & 0x4000:
-			self.flag = self.uchar()
+			self.flag = self.duchar()
 		else:
 			self.flag = None
 		self.x = x & 0x7fff
@@ -259,23 +392,22 @@ class CharLocaleBodyPacket(Packet):
 	cmd = 0x1b
 	length = 37
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		unk = self.uint() # Uknown
-		self.bodyType = self.ushort()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		unk = self.uchar() # Unknown
-		self.z = self.schar()
-		self.facing = self.schar()
-		unk = self.uint() # Unknown
-		unk = self.uint() # Unknown
-		unk = self.schar() # Unknown
-		self.widthM8 = self.ushort()
-		self.height = self.ushort()
-		unk = self.ushort() # Unknown
-		unk = self.uint() # Unknown
+	def decodeChild(self):
+		self.serial = self.duint()
+		unk = self.duint() # Uknown
+		self.bodyType = self.dushort()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		unk = self.duchar() # Unknown
+		self.z = self.dschar()
+		self.facing = self.dschar()
+		unk = self.duint() # Unknown
+		unk = self.duint() # Unknown
+		unk = self.dschar() # Unknown
+		self.widthM8 = self.dushort()
+		self.height = self.dushort()
+		unk = self.dushort() # Unknown
+		unk = self.duint() # Unknown
 
 
 class SendSpeechPacket(Packet):
@@ -283,27 +415,21 @@ class SendSpeechPacket(Packet):
 
 	cmd = 0x1c
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.model = self.ushort()
-		self.type = self.uchar()
-		self.color = self.ushort()
-		self.font = self.ushort()
-		self.name = self.string(30)
-		self.msg = self.string(self.length-44)
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.model = self.dushort()
+		self.type = self.duchar()
+		self.color = self.dushort()
+		self.font = self.dushort()
+		self.name = self.dstring(30)
+		self.msg = self.dstring(self.length-44)
 
 
-class DeleteObjectPacket(Packet):
+class DeleteObjectPacket(SerialOnlyPacket):
 	''' Object went out of sight '''
 
 	cmd = 0x1d
-	length = 5
-
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
 
 
 class ControlAnimationPacket(Packet):
@@ -312,11 +438,10 @@ class ControlAnimationPacket(Packet):
 	cmd = 0x1e
 	length = 4
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.uchar() # Unknown
-		self.uchar() # Unknown
-		self.uchar() # Unknown
+	def decodeChild(self):
+		self.duchar() # Unknown
+		self.duchar() # Unknown
+		self.duchar() # Unknown
 
 
 class DrawGamePlayerPacket(Packet):
@@ -325,18 +450,17 @@ class DrawGamePlayerPacket(Packet):
 	cmd = 0x20
 	length = 19
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.graphic = self.ushort()
-		self.uchar() # unknown
-		self.hue = self.ushort()
-		self.flag = self.uchar()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.ushort() # unknown
-		self.direction = self.schar()
-		self.z = self.schar()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.graphic = self.dushort()
+		self.duchar() # unknown
+		self.hue = self.dushort()
+		self.flag = self.duchar()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.dushort() # unknown
+		self.direction = self.dschar()
+		self.z = self.dschar()
 
 
 class DrawContainerPacket(Packet):
@@ -345,10 +469,9 @@ class DrawContainerPacket(Packet):
 	cmd = 0x24
 	length = 7
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.gump = self.ushort()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.gump = self.dushort()
 
 
 class AddItemToContainerPacket(Packet):
@@ -357,16 +480,15 @@ class AddItemToContainerPacket(Packet):
 	cmd = 0x25
 	length = 20
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.graphic = self.ushort()
-		self.offset = self.uchar()
-		self.amount = self.ushort()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.container = self.uint()
-		self.color = self.ushort()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.graphic = self.dushort()
+		self.offset = self.duchar()
+		self.amount = self.dushort()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.container = self.duint()
+		self.color = self.dushort()
 
 
 class MobAttributesPacket(Packet):
@@ -375,15 +497,14 @@ class MobAttributesPacket(Packet):
 	cmd = 0x2d
 	length = 17
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.hits_max = self.ushort()
-		self.hits_current = self.ushort()
-		self.mana_max = self.ushort()
-		self.mana_current = self.ushort()
-		self.stam_max = self.ushort()
-		self.stam_current = self.ushort()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.hits_max = self.dushort()
+		self.hits_current = self.dushort()
+		self.mana_max = self.dushort()
+		self.mana_current = self.dushort()
+		self.stam_max = self.dushort()
+		self.stam_current = self.dushort()
 
 
 class Unk32Packet(Packet):
@@ -392,9 +513,35 @@ class Unk32Packet(Packet):
 	cmd = 0x32
 	length = 2
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.uchar()
+	def decodeChild(self):
+		self.duchar()
+
+
+class GetPlayerStatusPacket(Packet):
+	''' Requests player status '''
+
+	## God client
+	TYP_GOD  = 0x00
+	## Basic Status (Packet 0x11)
+	TYP_BASE = 0x04
+	## Skill info (Packet 0x3a)
+	TYP_SKILLS = 0x05
+
+	cmd = 0x34
+	length = 10
+
+	def fill(self, type, serial):
+		'''
+		@param type int: What to request (see TYP_ constants)
+		@param serial: int: The character's serial
+		'''
+		self.type = type
+		self.serial = serial
+
+	def encodeChild(self):
+		self.euint(0xedededed) #Pattern (unknown)
+		self.euchar(self.type)
+		self.euint(self.serial)
 
 
 class SendSkillsPacket(Packet):
@@ -403,14 +550,13 @@ class SendSkillsPacket(Packet):
 
 	cmd = 0x3a
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		typ = self.uchar() # 0x00 full list, 0xff single skill, 0x02 full with caps, 0xdf single with caps
+	def decodeChild(self):
+		self.length = self.dushort()
+		typ = self.duchar() # 0x00 full list, 0xff single skill, 0x02 full with caps, 0xdf single with caps
 		self.skills = {}
 		while True:
 			try:
-				id = self.ushort()
+				id = self.dushort()
 			except EOFError:
 				break
 			else:
@@ -419,10 +565,10 @@ class SendSkillsPacket(Packet):
 			assert id not in self.skills
 			self.skills[id] = {
 				'id': id,
-				'val': self.ushort(), # Current value, in tenths
-				'base': self.ushort(), # Base value, in tenths
-				'lock': self.uchar(), # Lock status 0 = up, 1 = down, 2 =locked
-				'cap': self.ushort() if typ == 0x02 or typ == 0xdf else None
+				'val': self.dushort(), # Current value, in tenths
+				'base': self.dushort(), # Base value, in tenths
+				'lock': self.duchar(), # Lock status 0 = up, 1 = down, 2 =locked
+				'cap': self.dushort() if typ == 0x02 or typ == 0xdf else None
 			}
 
 
@@ -431,21 +577,20 @@ class AddItemsToContainerPacket(Packet):
 
 	cmd = 0x3c
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		itemNum = self.ushort()
+	def decodeChild(self):
+		self.length = self.dushort()
+		itemNum = self.dushort()
 		self.items = []
 		for i in range(0, itemNum):
 			self.items.append({
-				'serial': self.uint(),
-				'graphic': self.ushort(),
-				'unknown': self.uchar(),
-				'amount': self.ushort(),
-				'x': self.ushort(),
-				'y': self.ushort(),
-				'container': self.uint(),
-				'color': self.ushort(),
+				'serial': self.duint(),
+				'graphic': self.dushort(),
+				'unknown': self.duchar(),
+				'amount': self.dushort(),
+				'x': self.dushort(),
+				'y': self.dushort(),
+				'container': self.duint(),
+				'color': self.dushort(),
 			})
 
 
@@ -455,9 +600,8 @@ class OverallLightLevelPacket(Packet):
 	cmd = 0x4f
 	length = 2
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.level = self.uchar()
+	def decodeChild(self):
+		self.level = self.duchar()
 
 
 class PlaySoundPacket(Packet):
@@ -466,14 +610,13 @@ class PlaySoundPacket(Packet):
 	cmd = 0x54
 	length = 12
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.mode = self.uchar()
-		self.model = self.ushort()
-		self.ushort() # unknown
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.z = self.ushort()
+	def decodeChild(self):
+		self.mode = self.duchar()
+		self.model = self.dushort()
+		self.dushort() # unknown
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.z = self.dushort()
 
 
 class LoginCompletePacket(Packet):
@@ -482,8 +625,37 @@ class LoginCompletePacket(Packet):
 	cmd = 0x55
 	length = 1
 
-	def __init__(self, buf):
-		super().__init__(buf)
+	def decodeChild(self):
+		pass
+
+
+class LoginCharacterPacket(Packet):
+	''' Selects the character during login '''
+
+	cmd = 0x5d
+	length = 73
+
+	def fill(self, name, idx):
+		'''
+		@param name string: The character name
+		@param int: The character slot index
+		'''
+		self.name = name
+		self.idx = idx
+
+	def encodeChild(self):
+		self.euint(0xedededed) #Pattern1
+		self.estring(self.name, 30)
+		self.eushort(0x0000)   #unknown0
+		self.euint(0x00000000) #clientflag
+		self.euint(0x00000000) #unknown1
+		self.euint(0x0000001d) #login count
+		self.euint(0x00000000) # unknown2
+		self.euint(0x00000000) # unknown2
+		self.euint(0x00000000) # unknown2
+		self.euint(0x00000000) # unknown2
+		self.euint(self.idx)
+		self.eip('127.0.0.1')
 
 
 class SetWeatherPacket(Packet):
@@ -492,34 +664,72 @@ class SetWeatherPacket(Packet):
 	cmd = 0x65
 	length = 4
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.type = self.uchar()
-		self.num = self.uchar()
-		self.temp = self.uchar()
+	def decodeChild(self):
+		self.type = self.duchar()
+		self.num = self.duchar()
+		self.temp = self.duchar()
 
 
 class TargetCursorPacket(Packet):
 	''' Requesting/Answering a target '''
 
+	# Constants for what
+	OBJECT = 0
+	LOCATION = 1
+
+	# Constants for type
+	NEUTRAL = 0
+	HARMFUL = 1
+	HELPFUL = 2
+
 	cmd = 0x6c
 	length = 19
 
-	def __init__(self, buf):
-		super().__init__(buf)
+	def fill(self, what, id, type, serial, x=0, y=0, z=0, graphic=0):
+		'''
+		@param what int: what to target, see constants
+		@param id int: The id of the target that we are answering to
+		@param type int: The target type, see constants
+		@param serial int: Serial of the targetted object
+		@param x int: X coordinate of the targetted location
+		@param y int: Y coordinate of the targetted location
+		@param z int: Z coordinate of the targetted location
+		@param graphic int: Graphic of the targetted static tile
+		'''
+		self.what = what
+		self.id = id
+		self.type = type
+		self.serial = serial
+		self.x = x
+		self.y = y
+		self.z = z
+		self.graphic = graphic
+
+	def encodeChild(self):
+		self.euchar(self.what)
+		self.euint(self.id)
+		self.euchar(self.type)
+		self.euint(self.serial)
+		self.eushort(self.x)
+		self.eushort(self.y)
+		self.euchar(0) # unknown
+		self.eschar(self.z)
+		self.eushort(self.graphic)
+
+	def decodeChild(self):
 		## 0 = object, 1 = location
-		self.what = self.uchar()
-		self.id = self.uint()
+		self.what = self.duchar()
+		self.id = self.duint()
 		## 0 = Neutral, 1 = Harmful, 2 = Helpful, 3 = Cancel (server sent)
-		self.type = self.uchar()
+		self.type = self.duchar()
 
 		# Following data ignored when sent my server
-		self.uint() # Clicked on
-		self.ushort() # x
-		self.ushort() # y
-		self.uchar() # unknown
-		self.schar() # z
-		self.ushort() # graphic (if static tile)
+		self.duint() # Clicked on
+		self.dushort() # x
+		self.dushort() # y
+		self.duchar() # unknown
+		self.dschar() # z
+		self.dushort() # graphic (if static tile)
 
 
 class PlayMidiPacket(Packet):
@@ -528,9 +738,8 @@ class PlayMidiPacket(Packet):
 	cmd = 0x6d
 	length = 3
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.music = self.ushort()
+	def decodeChild(self):
+		self.music = self.dushort()
 
 
 class CharacterAnimationPacket(Packet):
@@ -539,16 +748,15 @@ class CharacterAnimationPacket(Packet):
 	cmd = 0x6e
 	length = 14
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.action = self.ushort()
-		self.uchar() # unknown
-		self.frames = self.uchar()
-		self.repeat = self.ushort()
-		self.backwards = self.uchar()
-		self.repeat = self.uchar()
-		self.delay = self.uchar()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.action = self.dushort()
+		self.duchar() # unknown
+		self.frames = self.duchar()
+		self.repeat = self.dushort()
+		self.backwards = self.duchar()
+		self.repeat = self.duchar()
+		self.delay = self.duchar()
 
 
 class GraphicalEffectPacket(Packet):
@@ -557,23 +765,22 @@ class GraphicalEffectPacket(Packet):
 	cmd = 0x70
 	length = 28
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.direction = self.uchar()
-		self.serial = self.uint()
-		self.target = self.uint()
-		self.graphic = self.ushort()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.z = self.schar()
-		self.tx = self.ushort()
-		self.ty = self.ushort()
-		self.tz = self.schar()
-		self.speed = self.uchar()
-		self.duration = self.uchar()
-		self.ushort() # Unknown
-		self.adjust = self.uchar()
-		self.explode = self.uchar()
+	def decodeChild(self):
+		self.direction = self.duchar()
+		self.serial = self.duint()
+		self.target = self.duint()
+		self.graphic = self.dushort()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.z = self.dschar()
+		self.tx = self.dushort()
+		self.ty = self.dushort()
+		self.tz = self.dschar()
+		self.speed = self.duchar()
+		self.duration = self.duchar()
+		self.dushort() # Unknown
+		self.adjust = self.duchar()
+		self.explode = self.duchar()
 
 
 class WarModePacket(Packet):
@@ -582,12 +789,11 @@ class WarModePacket(Packet):
 	cmd = 0x72
 	length = 5
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.war = self.uchar()
-		self.uchar() # unknown
-		self.uchar() # unknown
-		self.uchar() # unknown
+	def decodeChild(self):
+		self.war = self.duchar()
+		self.duchar() # unknown
+		self.duchar() # unknown
+		self.duchar() # unknown
 
 
 class PingPacket(Packet):
@@ -596,9 +802,17 @@ class PingPacket(Packet):
 	cmd = 0x73
 	length = 2
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.seq = self.uchar()
+	def fill(self, seq):
+		'''
+		@param seq int: Sequence number
+		'''
+		self.seq = seq
+
+	def encodeChild(self):
+		self.euchar(self.seq)
+
+	def decodeChild(self):
+		self.seq = self.duchar()
 
 
 class UpdatePlayerPacket(Packet):
@@ -607,17 +821,16 @@ class UpdatePlayerPacket(Packet):
 	cmd = 0x77
 	length = 17
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.graphic = self.ushort()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.z = self.schar()
-		self.facing = self.schar()
-		self.color = self.ushort()
-		self.flag = self.uchar()
-		self.notoriety = self.uchar()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.graphic = self.dushort()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.z = self.dschar()
+		self.facing = self.dschar()
+		self.color = self.dushort()
+		self.flag = self.duchar()
+		self.notoriety = self.duchar()
 
 
 class DrawObjectPacket(Packet):
@@ -625,27 +838,26 @@ class DrawObjectPacket(Packet):
 
 	cmd = 0x78
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.graphic = self.ushort()
-		self.x = self.ushort()
-		self.y = self.ushort()
-		self.z = self.schar()
-		self.facing = self.schar()
-		self.color = self.ushort()
-		self.flag = self.uchar()
-		self.notoriety = self.uchar()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.graphic = self.dushort()
+		self.x = self.dushort()
+		self.y = self.dushort()
+		self.z = self.dschar()
+		self.facing = self.dschar()
+		self.color = self.dushort()
+		self.flag = self.duchar()
+		self.notoriety = self.duchar()
 		self.equip = []
 		while True:
-			serial = self.uint()
+			serial = self.duint()
 			if not serial:
 				break
-			graphic = self.ushort()
-			layer = self.uchar()
+			graphic = self.dushort()
+			layer = self.duchar()
 			if graphic & 0x8000:
-				color = self.ushort()
+				color = self.dushort()
 			else:
 				color = 0
 			self.equip.append({
@@ -655,7 +867,29 @@ class DrawObjectPacket(Packet):
 				'color': color,
 			})
 #		if not len(self.equip):
-#			self.uchar() # unused/closing
+#			self.duchar() # unused/closing
+
+
+class LoginRequestPacket(Packet):
+	''' Login request to server '''
+
+	cmd = 0x80
+	length = 62
+
+	def fill(self, account, password, nlk=0):
+		'''
+		@param account string: The username
+		@param password string: The password
+		@param nlk byte: NextLoginKey value from uo.cfg on client machine
+		'''
+		self.account = account
+		self.password = password
+		self.nlk = nlk
+
+	def encodeChild(self):
+		self.estring(self.account, 30)
+		self.estring(self.password, 30)
+		self.euchar(self.nlk)
 
 
 class LoginDeniedPacket(Packet):
@@ -664,9 +898,8 @@ class LoginDeniedPacket(Packet):
 	cmd = 0x82
 	length = 2
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.reason = self.uchar()
+	def decodeChild(self):
+		self.reason = self.duchar()
 
 
 class ConnectToGameServerPacket(Packet):
@@ -675,11 +908,32 @@ class ConnectToGameServerPacket(Packet):
 	cmd = 0x8c
 	length = 11
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.ip = self.ip()
-		self.port = self.ushort()
-		self.key = self.uint()
+	def decodeChild(self):
+		self.ip = self.dip()
+		self.port = self.dushort()
+		self.key = self.duint()
+
+
+class GameServerLoginPacket(Packet):
+	''' Login request to game server '''
+
+	cmd = 0x91
+	length = 65
+
+	def fill(self, key, account, password):
+		'''
+		@param key: The key used
+		@param account string: The username
+		@param password string: The password
+		'''
+		self.key = key
+		self.account = account
+		self.password = password
+
+	def encodeChild(self):
+		self.euint(self.key)
+		self.estring(self.account, 30)
+		self.estring(self.password, 30)
 
 
 class UpdateHealthPacket(UpdateVitalPacket):
@@ -687,17 +941,11 @@ class UpdateHealthPacket(UpdateVitalPacket):
 
 	cmd = 0xa1
 
-	def __init__(self, buf):
-		super().__init__(buf)
-
 
 class UpdateManaPacket(UpdateVitalPacket):
 	''' Updates current mana '''
 
 	cmd = 0xa2
-
-	def __init__(self, buf):
-		super().__init__(buf)
 
 
 class UpdateStaminaPacket(UpdateVitalPacket):
@@ -705,22 +953,18 @@ class UpdateStaminaPacket(UpdateVitalPacket):
 
 	cmd = 0xa3
 
-	def __init__(self, buf):
-		super().__init__(buf)
-
 
 class TipWindowPacket(Packet):
 	''' Tip/Notice Window '''
 
 	cmd = 0xa6
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.flag = self.uchar()
-		self.tipid = self.uint()
-		msgSize = self.ushort()
-		self.msg = self.string(msgSize)
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.flag = self.duchar()
+		self.tipid = self.duint()
+		msgSize = self.dushort()
+		self.msg = self.dstring(msgSize)
 
 
 class ServerListPacket(Packet):
@@ -728,19 +972,18 @@ class ServerListPacket(Packet):
 
 	cmd = 0xa8
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.flag = self.uchar()
-		self.numServers = self.ushort()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.flag = self.duchar()
+		self.numServers = self.dushort()
 		self.servers = []
 		for i in range(0, self.numServers):
 			self.servers.append({
-				'idx': self.ushort(),
-				'name': self.string(32),
-				'full': self.uchar(),
-				'tz': self.uchar(),
-				'ip': self.ip(),
+				'idx': self.dushort(),
+				'name': self.dstring(32),
+				'full': self.duchar(),
+				'tz': self.duchar(),
+				'ip': self.dip(),
 			})
 
 
@@ -749,36 +992,83 @@ class CharactersPacket(Packet):
 
 	cmd = 0xa9
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.numChars = self.uchar()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.numChars = self.duchar()
 		self.chars = []
 		for i in range(0, self.numChars):
 			self.chars.append({
-				'name': self.string(30),
-				'pass': self.string(30),
+				'name': self.dstring(30),
+				'pass': self.dstring(30),
 			})
-		self.numLocs = self.uchar()
+		self.numLocs = self.duchar()
 		self.locs = []
 		for i in range(0, self.numLocs):
 			self.locs.append({
-				'idx': self.uchar(),
-				'name': self.string(31),
-				'area': self.string(31),
+				'idx': self.duchar(),
+				'name': self.dstring(31),
+				'area': self.dstring(31),
 			})
-		self.flags = self.uint()
+		self.flags = self.duint()
 
 
-class AllowAttackPacket(Packet):
+class AllowAttackPacket(SerialOnlyPacket):
 	''' Allow/Refuse attack '''
 
 	cmd = 0xaa
-	length = 5
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
+
+class UnicodeSpeechRequestPacket(Packet):
+	''' Unicode speech request packet '''
+
+	## Normal speech
+	TYP_NORMAL = 0x00
+	## Broadcast/System
+	TYP_BROADCAST = 0x01
+	## Emote
+	TYP_EMOTE = 0x02
+	## System/Lower corner
+	TYP_SYSTEM = 0x06
+	## Message/Corner with name
+	TYP_MESSAGE = 0x07
+	## Whisper
+	TYP_WHISPER = 0x08
+	## Yell
+	TYP_YELL = 0x09
+	## Spell
+	TYP_SPELL =0x0a
+	## Guild Chat
+	TYP_GUILD = 0xd
+	## Alliance Chat
+	TYP_ALLIANCE = 0x0e
+	## Command Prompts
+	TYP_COMMAND = 0x0f
+
+	cmd = 0xad
+
+	def fill(self, type, lang, text, color, font):
+		'''
+		@param type int: Speech type, see TYP_ constants
+		@param lang string: Three letter language code
+		@param text string: What to say
+		@param color int: Color code
+		@param font int: Font code
+		'''
+		self.type = type
+		self.lang = lang
+		self.text = text
+		self.color = color
+		self.font = font
+		self.length = 1 + 2 + 1 + 2 + 2 + 4 + len(self.text)*2+2
+
+	def encodeChild(self):
+		self.eulen()
+		self.euchar(self.type)
+		self.eushort(self.color)
+		self.eushort(self.font)
+		assert len(self.lang) == 3
+		self.estring(self.lang, 4)
+		self.estring(self.text, len(self.text) + 1, True)
 
 
 class UnicodeSpeech(Packet):
@@ -786,17 +1076,16 @@ class UnicodeSpeech(Packet):
 
 	cmd = 0xae
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.model = self.ushort()
-		self.type = self.uchar()
-		self.color = self.ushort()
-		self.font = self.ushort()
-		self.lang = self.string(4)
-		self.name = self.string(30)
-		self.msg = self.ucstring(self.length-48)
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.model = self.dushort()
+		self.type = self.duchar()
+		self.color = self.dushort()
+		self.font = self.dushort()
+		self.lang = self.dstring(4)
+		self.name = self.dstring(30)
+		self.msg = self.ducstring(self.length-48)
 
 
 class SendGumpDialogPacket(Packet):
@@ -804,21 +1093,20 @@ class SendGumpDialogPacket(Packet):
 
 	cmd = 0xb0
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.gumpid = self.uint()
-		self.x = self.uint()
-		self.y = self.uint()
-		cmdLen = self.ushort()
-		self.commands = self.string(cmdLen)
-		textLines = self.ushort()
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.gumpid = self.duint()
+		self.x = self.duint()
+		self.y = self.duint()
+		cmdLen = self.dushort()
+		self.commands = self.dstring(cmdLen)
+		textLines = self.dushort()
 		self.texts = []
 		for i in range(0, textLines):
-			tlen = self.ushort() # In unicode 2-bytes chars
-			self.texts.append(self.ucstring(tlen*2))
-		self.uchar() # Trailing byte? TODO: check this
+			tlen = self.dushort() # In unicode 2-bytes chars
+			self.texts.append(self.ducstring(tlen*2))
+		self.duchar() # Trailing byte? TODO: check this
 
 
 class EnableFeaturesPacket(Packet):
@@ -827,9 +1115,8 @@ class EnableFeaturesPacket(Packet):
 	cmd = 0xb9
 	length = 3
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.features = self.ushort()
+	def decodeChild(self):
+		self.features = self.dushort()
 
 
 class SeasonInfoPacket(Packet):
@@ -838,10 +1125,26 @@ class SeasonInfoPacket(Packet):
 	cmd = 0xbc
 	length = 3
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.flag = self.uchar()
-		self.sound = self.uchar()
+	def decodeChild(self):
+		self.flag = self.duchar()
+		self.sound = self.duchar()
+
+
+class ClientVersionPacket(Packet):
+	''' Send client version to the server '''
+
+	cmd = 0xbd
+
+	def fill(self, version):
+		'''
+		@param version string: The client, version, as string
+		'''
+		self.version = version
+		self.length = 1 + 2 + len(version)+1
+
+	def encodeChild(self):
+		self.eulen()
+		self.estring(self.version, len(self.version)+1)
 
 
 class GeneralInfoPacket(Packet):
@@ -871,68 +1174,109 @@ class GeneralInfoPacket(Packet):
 	SUB_MEGACLILOC = 0x10
 	## Send House Revision State
 	SUB_HOUSE_REV = 0x1d
+	## Login
+	SUB_LOGIN = 0x1f
 	## Enable map-diff files
 	SUB_MAPDIFF = 0x18
 
 	cmd = 0xbf
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.sub = self.ushort()
+	def fill(self, sub, *args):
+		'''
+		@param sub int: The subcommand, see SUB_ constants
+		@param *args: Variable number of arguments, depending on sub:
+		              - SUB_LOGIN: no more arguments needed
+		              - SUB_LANG:
+		                - lang string: The language name
+		'''
+		self.sub = sub
+
+		def checkArgLen(expLen):
+			if len(args) != expLen:
+				raise TypeError("Subcommand {:02x} takes {} positional argument(s) " + \
+						"but {} were given".format(self.sub, expLen, len(args)))
+
+		if self.sub == self.SUB_LOGIN:
+			checkArgLen(0)
+			self.length = 5 + 2
+
+		elif self.sub == self.SUB_LANG:
+			checkArgLen(1)
+			self.lang = args[0]
+			self.length = 5 + len(self.lang)+1
+
+		else:
+			raise NotImplementedError('Subcommand {:02x} not implemented to send'.format(self.sub))
+
+	def encodeChild(self):
+		self.eulen()
+		self.eushort(self.sub)
+
+		if self.sub == self.SUB_LOGIN:
+			self.eushort(0x0000)
+
+		elif self.sub == self.SUB_LANG:
+			self.estring(self.lang, len(self.lang)+1)
+
+		else:
+			raise NotImplementedError('Subcommand {:02x} not implemented yet'.format(self.sub))
+
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.sub = self.dushort()
 
 		if self.sub == self.SUB_FASTWALK:
 			self.keys = []
 			for i in range(0, 6):
-				self.keys.append(self.uint())
+				self.keys.append(self.duint())
 
 		elif self.sub == self.SUB_ADDFWKEY:
-			self.key = self.uint()
+			self.key = self.duint()
 
 		elif self.sub == self.SUB_CLOSEGUMP:
-			self.gumpid = self.uint()
-			self.buttonid = self.uint()
+			self.gumpid = self.duint()
+			self.buttonid = self.duint()
 
 		elif self.sub == self.SUB_SCREENSIZE:
-			unk = self.ushort()
-			self.x = self.ushort()
-			self.y = self.ushort()
-			unk = self.ushort()
+			unk = self.dushort()
+			self.x = self.dushort()
+			self.y = self.dushort()
+			unk = self.dushort()
 
 		elif self.sub == self.SUB_PARTY:
-			self.data = self.pb(len(self.buf))
+			self.data = self.rpb(len(self.buf))
 
 		elif self.sub == self.SUB_CURSORMAP:
-			self.cursor = self.uchar()
+			self.cursor = self.duchar()
 
 		elif self.sub == self.SUB_STUN:
 			raise NotImplementedError("This should no longer be used")
 
 		elif self.sub == self.SUB_LANG:
-			self.lang = self.string(3)
+			self.lang = self.dstring(3)
 
 		elif self.sub == self.SUB_CLOSESTATUS:
-			self.serial = self.uint()
+			self.serial = self.duint()
 
 		elif self.sub == self.SUB_3DACT:
-			self.animation = self.uint()
+			self.animation = self.duint()
 
 		elif self.sub == self.SUB_MAPDIFF:
-			mapNum = self.uint()
+			mapNum = self.duint()
 			self.maps = []
 			for i in range(0, mapNum):
 				self.maps.append({
-					'mpatches': self.uint(),
-					'spatches': self.uint(),
+					'mpatches': self.duint(),
+					'spatches': self.duint(),
 				})
 
 		elif self.sub == self.SUB_MEGACLILOC:
-			self.serial = self.uint()
-			self.revision = self.uint()
+			self.serial = self.duint()
+			self.revision = self.duint()
 
 		elif self.sub == self.SUB_HOUSE_REV:
-			self.serial = self.uint()
-			self.rev = self.uint()
+			self.serial = self.duint()
+			self.rev = self.duint()
 
 		else:
 			raise NotImplementedError("Subcommand 0x%0.2X not implemented yet." % self.sub)
@@ -943,17 +1287,16 @@ class ClilocMsgPacket(Packet):
 
 	cmd = 0xc1
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.id = self.uint()
-		self.body = self.ushort()
-		self.type = self.uchar()
-		self.hue = self.ushort()
-		self.font = self.ushort()
-		self.msg = self.uint()
-		self.speaker_name = self.string(30)
-		self.unicode_string = self.pb(self.length-48)
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.id = self.duint()
+		self.body = self.dushort()
+		self.type = self.duchar()
+		self.hue = self.dushort()
+		self.font = self.dushort()
+		self.msg = self.duint()
+		self.speaker_name = self.dstring(30)
+		self.unicode_string = self.rpb(self.length-48)
 
 
 class MegaClilocRevPacket(Packet):
@@ -962,10 +1305,9 @@ class MegaClilocRevPacket(Packet):
 	cmd = 0xdc
 	length = 9
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.serial = self.uint()
-		self.revision = self.uint()
+	def decodeChild(self):
+		self.serial = self.duint()
+		self.revision = self.duint()
 
 
 class CompressedGumpPacket(Packet):
@@ -973,21 +1315,20 @@ class CompressedGumpPacket(Packet):
 
 	cmd = 0xdd
 
-	def __init__(self, buf):
-		super().__init__(buf)
-		self.length = self.ushort()
-		self.serial = self.uint()
-		self.gumpid = self.uint()
-		self.x = self.uint()
-		self.y = self.uint()
-		cLen = self.uint()
-		dLen = self.uint()
-		self.commands = zlib.decompress(self.pb(cLen-4))
+	def decodeChild(self):
+		self.length = self.dushort()
+		self.serial = self.duint()
+		self.gumpid = self.duint()
+		self.x = self.duint()
+		self.y = self.duint()
+		cLen = self.duint()
+		dLen = self.duint()
+		self.commands = zlib.decompress(self.rpb(cLen-4))
 		assert len(self.commands) == dLen
-		textLines = self.uint()
-		ctxtLen = self.uint()
-		dtxtLen = self.uint()
-		self.texts = zlib.decompress(self.pb(ctxtLen-4))
+		textLines = self.duint()
+		ctxtLen = self.duint()
+		dtxtLen = self.duint()
+		self.texts = zlib.decompress(self.rpb(ctxtLen-4))
 		assert len(self.texts) == dtxtLen
-		#self.uchar() # Trailing byte?
+		#self.duchar() # Trailing byte?
 

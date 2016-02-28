@@ -108,9 +108,17 @@ class Network:
 		self.sock.close()
 
 	def send(self, data):
-		''' Sends a packet, expects raw binary data '''
-		self.log.debug('-> 0x%0.2X, %d bytes\n"%s"', data[0], len(data), data)
-		self.sock.send(data)
+		''' Sends a packet or raw binary data '''
+		if isinstance(data, packets.Packet):
+			raw = data.encode()
+			assert data.validated
+		elif isinstance(data, bytes):
+			raw = data
+		else:
+			raise ValueError('Expecting Packet or bytes')
+
+		self.log.debug('-> 0x%0.2X, %d bytes\n"%s"', raw[0], len(raw), raw)
+		self.sock.send(raw)
 
 	def recv(self, force=False):
 		''' Reads next packet from the server, waits until a full packet is received '''
@@ -142,7 +150,6 @@ class Network:
 		self.log.debug('<- 0x%0.2X, %d bytes, %s\n"%s"', raw[0], len(raw), cinfo, raw)
 
 		pkt = Ph.process(raw)
-		pkt.validate()
 		assert pkt.validated
 		assert pkt.length == len(raw)
 
@@ -190,16 +197,16 @@ class Ph:
 	''' Packet Handler '''
 
 	SERVER_LIST              = packets.ServerListPacket.cmd
-	LOGIN_CHARACTER          = 0x5d
-	LOGIN_REQUEST            = 0x80
+	LOGIN_CHARACTER          = packets.LoginCharacterPacket.cmd
+	LOGIN_REQUEST            = packets.LoginRequestPacket.cmd
 	CHARACTERS               = packets.CharactersPacket.cmd
 	CONNECT_TO_GAME_SERVER   = packets.ConnectToGameServerPacket.cmd
-	GAME_SERVER_LOGIN        = 0x91
-	REQUEST_STATUS           = 0x34
-	CLIENT_VERSION           = 0xbd
-	SINGLE_CLICK             = 0x09
-	DOUBLE_CLICK             = 0x06
-	UNICODE_SPEECH_REQUEST   = 0xad
+	GAME_SERVER_LOGIN        = packets.GameServerLoginPacket.cmd
+	REQUEST_STATUS           = packets.GetPlayerStatusPacket.cmd
+	CLIENT_VERSION           = packets.ClientVersionPacket.cmd
+	SINGLE_CLICK             = packets.SingleClickPacket.cmd
+	DOUBLE_CLICK             = packets.DoubleClickPacket.cmd
+	UNICODE_SPEECH_REQUEST   = packets.UnicodeSpeechRequestPacket.cmd
 	PING                     = packets.PingPacket.cmd
 	ENABLE_FEATURES          = packets.EnableFeaturesPacket.cmd
 	CHAR_LOCALE_BODY         = packets.CharLocaleBodyPacket.cmd
@@ -290,76 +297,12 @@ class Ph:
 		''' Init next packet from buffer, returns a packet instance '''
 		cmd = buf[0]
 		try:
-			return Ph.HANDLERS[cmd](buf)
+			pktClass = Ph.HANDLERS[cmd]
 		except KeyError:
 			raise NotImplementedError("Unknown packet 0x%0.2X, %d bytes\n%s" % (cmd, len(buf), buf))
-
-
-class PacketOut:
-	''' Helper class for outputting a packet '''
-	def __init__(self, cmd):
-		self.buf = b''
-		self.uchar(cmd)
-		self.lenIdx = None
-
-	def ulen(self):
-		''' Special value: will place there an ushort containing packet length '''
-		assert self.lenIdx is None
-		self.lenIdx = len(self.buf)
-		self.ushort(0)
-
-	def uchar(self, val):
-		''' Add an unsigned char (byte) to the packet '''
-		if not isinstance(val, int):
-			raise TypeError("Expected int, got {}".format(type(val)))
-		if val < 0 or val > 255:
-			raise ValueError("Byte {} out of range".format(val))
-		self.buf += struct.pack('B', val)
-
-	def schar(self, val):
-		''' Add a signed char (byte) to the packet '''
-		if not isinstance(val, int):
-			raise TypeError("Expected int, got {}".format(type(val)))
-		if val < 0 or val > 255:
-			raise ValueError("Byte {} out of range".format(val))
-		self.buf += struct.pack('b', val)
-
-	def ushort(self, val):
-		''' Adds an unsigned short to the packet '''
-		if not isinstance(val, int):
-			raise TypeError("Expected int, got {}".format(type(val)))
-		if val < 0 or val > 0xffff:
-			raise ValueError("UShort {} out of range".format(val))
-		self.buf += struct.pack('>H', val)
-
-	def uint(self, val):
-		''' Adds and unsigned int to the packet '''
-		if not isinstance(val, int):
-			raise TypeError("Expected int, got {}".format(type(val)))
-		if val < 0 or val > 0xffffffff:
-			raise ValueError("UInt {} out of range".format(val))
-		self.buf += struct.pack('>I', val)
-
-	def string(self, val, length, unicode=False):
-		''' Adds a string to the packet '''
-		if not isinstance(val, str):
-			raise TypeError("Expected str, got {}".format(type(val)))
-		if len(val) > length:
-			raise ValueError('String "{}" too long'.format(val))
-		self.buf += packets.Packet.fixStr(val, length, unicode)
-
-	def ip(self, val):
-		''' Adds an ip to the packet '''
-		if not isinstance(val, str):
-			raise TypeError("Expected str, got {}".format(type(val)))
-		self.buf += ipaddress.ip_address(val).packed
-
-	def getBytes(self):
-		''' Returns the packet as bytes '''
-		# Replace length if needed
-		if self.lenIdx is not None:
-			self.buf = self.buf[:self.lenIdx] + struct.pack('>H', len(self.buf)) + self.buf[self.lenIdx+2:]
-		return self.buf
+		pkt = pktClass()
+		pkt.decode(buf)
+		return pkt
 
 
 class NoFullPacketError(Exception):

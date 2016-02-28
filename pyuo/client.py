@@ -312,13 +312,13 @@ class Target:
 	''' Represents an active target '''
 
 	# Constants for what
-	OBJECT = 0
-	LOCATION = 1
+	OBJECT = packets.TargetCursorPacket.OBJECT
+	LOCATION = packets.TargetCursorPacket.LOCATION
 
 	# Constants for type
-	NEUTRAL = 0
-	HARMFUL = 1
-	HELPFUL = 2
+	NEUTRAL = packets.TargetCursorPacket.NEUTRAL
+	HARMFUL = packets.TargetCursorPacket.HARMFUL
+	HELPFUL = packets.TargetCursorPacket.HELPFUL
 
 	def __init__(self, client, pkt):
 		assert isinstance(pkt, packets.TargetCursorPacket)
@@ -331,17 +331,9 @@ class Target:
 
 	def target(self, obj):
 		''' Sends a target for the given object '''
-		assert self.what == self.OBJECT
-		po = net.PacketOut(net.Ph.TARGET_CURSOR)
-		po.uchar(self.what)
-		po.uint(self.id)
-		po.uchar(self.type)
-		po.uint(obj.serial) # Object
-		po.ushort(0) # X
-		po.ushort(0) # Y
-		po.uchar(0) # unknown
-		po.schar(0) # Z
-		po.ushort(0) # graphic
+		po = packets.TargetCursorPacket()
+		assert self.what == po.OBJECT
+		po.fill(self.what, self.id, self.type, obj.serial)
 		self.client.target = None
 		self.client.send(po)
 
@@ -427,6 +419,25 @@ class Speech:
 				self.typeName(), self.serial, self.name, p, self.msg)
 
 
+class Direction:
+	''' Represents a direction (movement, facing) '''
+
+	# Constants for id (cardinal points)
+	N  = 0
+	NE = 1
+	E  = 2
+	SE = 3
+	S  = 4
+	SW = 5
+	W  = 6
+	NW = 7
+
+	def __init__(self, id):
+		if id < 0 or id > 7:
+			raise ValueError('valid direction ids are 0-7')
+		self.id = id
+
+
 class Client:
 	''' The main client instance '''
 
@@ -457,6 +468,8 @@ class Client:
 		self.flags = None
 		## Locations sent with 0xa9 packets
 		self.locs = None
+		## Last move sequence number used
+		self.moveid = 0
 
 		## Reference to player, character instance
 		self.player = None
@@ -505,10 +518,8 @@ class Client:
 
 		# Send account login request
 		self.log.info('logging in')
-		po = net.PacketOut(net.Ph.LOGIN_REQUEST)
-		po.string(self.server['user'], 30)
-		po.string(self.server['pass'], 30)
-		po.uchar(0x00)
+		po = packets.LoginRequestPacket()
+		po.fill(self.server['user'], self.server['pass'])
 		self.send(po)
 
 		# Get servers list
@@ -542,10 +553,8 @@ class Client:
 
 		# Send login
 		self.log.info('logging in')
-		po = net.PacketOut(net.Ph.GAME_SERVER_LOGIN)
-		po.uint(pkt.key)
-		po.string(self.server['user'], 30)
-		po.string(self.server['pass'], 30)
+		po = packets.GameServerLoginPacket()
+		po.fill(pkt.key, self.server['user'], self.server['pass'])
 		self.send(po)
 
 		# From now on, server will use compression
@@ -567,19 +576,8 @@ class Client:
 	def selectCharacter(self, name, idx):
 		''' Login the character with the given name '''
 		self.log.info('selecting character #%d %s', idx, name)
-		po = net.PacketOut(net.Ph.LOGIN_CHARACTER)
-		po.uint(0xedededed) #Pattern1
-		po.string(name, 30) #Char name
-		po.ushort(0x0000)   #unknown0
-		po.uint(0x00000000) #clientflag
-		po.uint(0x00000000) #unknown1
-		po.uint(0x0000001d) #login count
-		po.uint(0x00000000) # unknown2
-		po.uint(0x00000000) # unknown2
-		po.uint(0x00000000) # unknown2
-		po.uint(0x00000000) # unknown2
-		po.uint(idx) # slot chosen
-		po.ip('127.0.0.1')
+		po = packets.LoginCharacterPacket()
+		po.fill(name, idx)
 		self.send(po)
 
 		self.status = 'game'
@@ -604,8 +602,8 @@ class Client:
 
 			# Send ping if needed
 			if self.lc and self.ping < time.time():
-				po = net.PacketOut(net.Ph.PING)
-				po.uchar(0x00)
+				po = packets.PingPacket()
+				po.fill(0)
 				self.send(po)
 				self.ping = time.time() + self.PING_INTERVAL
 
@@ -847,58 +845,50 @@ class Client:
 	@logincomplete
 	def sendVersion(self):
 		''' Sends client version to server, should not send it twice '''
-		po = net.PacketOut(net.Ph.CLIENT_VERSION)
-		po.ulen()
-		po.string(self.VERSION, len(self.VERSION)+1)
+		po = packets.ClientVersionPacket()
+		po.fill(self.VERSION)
 		self.send(po)
 
 	@logincomplete
 	def sendLanguage(self):
 		''' Sends client lamguage to server, should not send it twice '''
-		po = net.PacketOut(net.Ph.GENERAL_INFO)
-		po.ulen()
-		po.ushort(0x0b) # subcommad
-		po.string(self.LANG, len(self.LANG)+1)
+		po = packets.GeneralInfoPacket()
+		po.fill(po.SUB_LANG, self.LANG)
 		self.send(po)
 
 	@logincomplete
 	def sendClientType(self):
 		''' Sends client type flag, should be sent only once at login '''
-		po = net.PacketOut(net.Ph.GENERAL_INFO)
-		po.ulen()
-		po.uint(0x1f) # 0x1f for login, something else for char create=
+		po = packets.GeneralInfoPacket()
+		po.fill(po.SUB_LOGIN)
 		self.send(po)
 
 	@logincomplete
 	def requestSkills(self):
 		''' Requests skill info (0x3a packet) '''
-		po = net.PacketOut(net.Ph.REQUEST_STATUS)
-		po.uint(0xedededed) #Pattern (unknown)
-		po.uchar(0x05) # Type
-		po.uint(self.player.serial)
+		po = packets.GetPlayerStatusPacket()
+		po.fill(po.TYP_SKILLS, self.player.serial)
 		self.send(po)
 
 	@logincomplete
 	def requestStatus(self):
-		''' Requests basic statuc (0x11 packet) '''
-		po = net.PacketOut(net.Ph.REQUEST_STATUS)
-		po.uint(0xedededed) #Pattern (unknown)
-		po.uchar(0x04) # Type
-		po.uint(self.player.serial)
+		''' Requests basic status (0x11 packet) '''
+		po = packets.GetPlayerStatusPacket()
+		po.fill(po.TYP_BASE, self.player.serial)
 		self.send(po)
 
 	@logincomplete
 	def singleClick(self, obj):
 		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
-		po = net.PacketOut(net.Ph.SINGLE_CLICK)
-		po.uint(obj if type(obj) == int else obj.serial)
+		po = packets.SingleClickPacket()
+		po.fill(obj if type(obj) == int else obj.serial)
 		self.send(po)
 
 	@logincomplete
 	def doubleClick(self, obj):
 		''' Sends a single click for the given object (Item/Mobile or serial) to server '''
-		po = net.PacketOut(net.Ph.DOUBLE_CLICK)
-		po.uint(obj if type(obj) == int else obj.serial)
+		po = packets.DoubleClickPacket()
+		po.fill(obj if type(obj) == int else obj.serial)
 		self.send(po)
 
 	@logincomplete
@@ -908,15 +898,22 @@ class Client:
 		@param font int: Font code, usually 3
 		@param colot int: Font color, usually 0
 		'''
-		po = net.PacketOut(net.Ph.UNICODE_SPEECH_REQUEST)
-		po.ulen()
-		po.uchar(0x00) # Type TODO: implement other types
-		po.ushort(color)
-		po.ushort(font)
-		assert len(self.LANG) == 3
-		po.string(self.LANG, 4)
-		po.string(text, len(text)*2 + 1, True)
+		po = packets.UnicodeSpeechRequestPacket()
+		po.fill(po.TYP_NORMAL, self.LANG, text, color, font)
 		self.send(po)
+
+	@logincomplete
+	def move(self, dir):
+		''' Request the server to move on step in the given direction
+		@param dir Direction: instance od the requested direction or int
+		'''
+		if isinstance(dir, Direction):
+			pass
+		elif isinstance(dir, int):
+			dir = Direction(dir)
+		else:
+			raise ValueError('dir must be Direction or int')
+		raise NotImplementedError()
 
 	@logincomplete
 	def waitForTarget(self, timeout=None):
@@ -946,8 +943,6 @@ class Client:
 
 	def send(self, data):
 		''' Sends a raw packet to the Server '''
-		if isinstance(data, net.PacketOut):
-			data = data.getBytes()
 		self.net.send(data)
 
 	def receive(self, expect=None):

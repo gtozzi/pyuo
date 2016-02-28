@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 '''
 Do some consistency checks on the sources
@@ -24,12 +24,6 @@ class TestClient(unittest.TestCase):
 class TestSource(unittest.TestCase):
 	''' Source code tests '''
 
-	# List of base classes
-	BASE = (
-		'Packet',
-		'UpdateVitalPacket',
-	)
-
 	def testPacketsOrder(self):
 		''' Ensures packets are defined in the right order '''
 		classInfo = {}
@@ -50,15 +44,17 @@ class TestSource(unittest.TestCase):
 		self.assertTrue(len(classInfo) == len(classNames) and len(diffs) == 0,
 				'Bug in test script: "{}"'.format(diffs))
 
-		base = list(self.BASE)
+		base = True
 		lastId = None
 		for name in classNames:
 			c = classInfo[name]
-			if len(base):
-				self.assertTrue(name == base[0],
-						"Base class {} in wrong order".format(base[0]))
-				del base[0]
+
+			if not hasattr(c, 'cmd'):
+				# Consider classes without the 'cmd' attribute as base classes
+				self.assertTrue(base, "Base class {} found after concrete class")
 				continue
+
+			base = False
 
 			if lastId is not None:
 				self.assertTrue(lastId < c.cmd,
