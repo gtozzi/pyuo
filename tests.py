@@ -26,7 +26,8 @@ class TestPacketsOrder(unittest.TestCase):
 		for name, obj in inspect.getmembers(packets):
 			if name.startswith('__'):
 				continue
-			classInfo[name] = obj
+			if inspect.isclass(obj):
+				classInfo[name] = obj
 
 		classRe = re.compile(r'^\s*class\s+([a-zA-Z0-9_]+)')
 		classNames = []
@@ -35,7 +36,9 @@ class TestPacketsOrder(unittest.TestCase):
 			if m:
 				classNames.append(m.group(1))
 
-		self.assertTrue(len(classInfo) == len(classNames), "Bug in test script")
+		diffs = list( set(classNames) ^ set(classInfo.keys()) )
+		self.assertTrue(len(classInfo) == len(classNames) and len(diffs) == 0,
+				'Bug in test script: "{}"'.format(diffs))
 
 		base = list(self.BASE)
 		lastId = None
