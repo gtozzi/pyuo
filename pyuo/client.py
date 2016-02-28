@@ -523,7 +523,7 @@ class Client:
 		self.send(po)
 
 		# Get servers list
-		pkt = self.receive((net.Ph.SERVER_LIST, net.Ph.LOGIN_DENIED))
+		pkt = self.receive((packets.ServerListPacket, packets.LoginDeniedPacket))
 		if isinstance(pkt, packets.LoginDeniedPacket):
 			self.log.error('login denied')
 			raise LoginDeniedError(pkt.reason)
@@ -539,7 +539,7 @@ class Client:
 		self.log.info('selecting server %d', idx)
 		self.send(struct.pack('>BH', 0xa0, idx))
 
-		pkt = self.receive(net.Ph.CONNECT_TO_GAME_SERVER)
+		pkt = self.receive(packets.ConnectToGameServerPacket)
 		ip = '.'.join(map(str, pkt.ip))
 		self.log.info("Connecting to gameserver ip %s, port %s (key %s)", ip, pkt.port, pkt.key)
 
@@ -561,11 +561,11 @@ class Client:
 		self.net.compress = True
 
 		# Get features packet
-		pkt = self.receive(net.Ph.ENABLE_FEATURES)
+		pkt = self.receive(packets.EnableFeaturesPacket)
 		self.features = pkt.features
 
 		# Get character selection
-		pkt = self.receive(net.Ph.CHARACTERS)
+		pkt = self.receive(packets.CharactersPacket)
 		self.flags = pkt.flags
 		self.locs = pkt.locs
 
@@ -947,22 +947,22 @@ class Client:
 
 	def receive(self, expect=None):
 		''' Receives next packet from the server
-		@param expect int/str: If given, throws an exception if packet type is
-		                       not in the expected list/tuple
+		@param expect Packet/list: If given, throws an exception if packet
+		                           is not in the expected list/tuple
 		@return Packet
 		@throws UnexpectedPacketError
 		'''
 		pkt = self.net.recv()
 
-		if expect and isinstance(expect, int):
+		if expect and not isinstance(expect, tuple) and not isinstance(expect, list):
 			expect = (expect, )
 
-		if expect and pkt.cmd not in expect:
+		if expect and pkt.cmd not in [x.cmd for x in expect]:
 			err = "Expecting "
 			if len(expect) == 1:
-				err += "0x%0.2X packet" % expect
+				err += "0x%0.2X packet" % expect.cmd
 			else:
-				err += "one of %s packets" % '/'.join(["0x%0.2X"%x for x in expect])
+				err += "one of %s packets" % '/'.join(["0x%0.2X"%x.cmd for x in expect])
 			err += ", got 0x%0.2X intead" % pkt.cmd
 			raise UnexpectedPacketError(err)
 

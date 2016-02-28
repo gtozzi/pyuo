@@ -49,8 +49,7 @@ class TestSource(unittest.TestCase):
 		for name in classNames:
 			c = classInfo[name]
 
-			if not hasattr(c, 'cmd'):
-				# Consider classes without the 'cmd' attribute as base classes
+			if c not in packets.classes:
 				self.assertTrue(base, 'Base class "{}" found after concrete class')
 				continue
 

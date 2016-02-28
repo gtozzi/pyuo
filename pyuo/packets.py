@@ -23,6 +23,8 @@ import struct
 import logging
 import ipaddress
 import zlib
+import sys
+import inspect
 
 
 ################################################################################
@@ -1332,3 +1334,17 @@ class CompressedGumpPacket(Packet):
 		assert len(self.texts) == dtxtLen
 		#self.duchar() # Trailing byte?
 
+
+################################################################################
+# Build packet list when this module is imported, must stay at the end
+################################################################################
+
+
+''' Builds list of currectly defined packets, as a dict of classes sorted by ID '''
+classes = {}
+for name, obj in inspect.getmembers(sys.modules[__name__]):
+	if inspect.isclass(obj) and hasattr(obj, 'cmd'):
+		cmd = obj.cmd
+		if cmd in classes.keys():
+			raise RuntimeError("Duplicate packet 0x{:02x}".format(cmd))
+		classes[cmd] = obj

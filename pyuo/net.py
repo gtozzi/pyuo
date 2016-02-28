@@ -149,7 +149,15 @@ class Network:
 		cinfo = '{} compressed'.format(size) if self.compress else 'not compressed'
 		self.log.debug('<- 0x%0.2X, %d bytes, %s\n"%s"', raw[0], len(raw), cinfo, raw)
 
-		pkt = Ph.process(raw)
+		# Creates and instance of the packet from the buffer
+		cmd = raw[0]
+		try:
+			pktClass = packets.classes[cmd]
+		except KeyError:
+			raise NotImplementedError(
+					"Unknown packet 0x%0.2X, %d bytes\n%s" % (cmd, len(raw), raw))
+		pkt = pktClass()
+		pkt.decode(raw)
 		assert pkt.validated
 		assert pkt.length == len(raw)
 
@@ -191,118 +199,6 @@ class Network:
 				srcPos += 1
 
 		raise NoFullPacketError("No full packet could be read")
-
-
-class Ph:
-	''' Packet Handler '''
-
-	SERVER_LIST              = packets.ServerListPacket.cmd
-	LOGIN_CHARACTER          = packets.LoginCharacterPacket.cmd
-	LOGIN_REQUEST            = packets.LoginRequestPacket.cmd
-	CHARACTERS               = packets.CharactersPacket.cmd
-	CONNECT_TO_GAME_SERVER   = packets.ConnectToGameServerPacket.cmd
-	GAME_SERVER_LOGIN        = packets.GameServerLoginPacket.cmd
-	REQUEST_STATUS           = packets.GetPlayerStatusPacket.cmd
-	CLIENT_VERSION           = packets.ClientVersionPacket.cmd
-	SINGLE_CLICK             = packets.SingleClickPacket.cmd
-	DOUBLE_CLICK             = packets.DoubleClickPacket.cmd
-	UNICODE_SPEECH_REQUEST   = packets.UnicodeSpeechRequestPacket.cmd
-	PING                     = packets.PingPacket.cmd
-	ENABLE_FEATURES          = packets.EnableFeaturesPacket.cmd
-	CHAR_LOCALE_BODY         = packets.CharLocaleBodyPacket.cmd
-	GENERAL_INFO             = packets.GeneralInfoPacket.cmd
-	UNKNOWN_32               = packets.Unk32Packet.cmd
-	CONTROL_ANIMATION        = packets.ControlAnimationPacket.cmd
-	CHARACTER_ANIMATION      = packets.CharacterAnimationPacket.cmd
-	GRAPHICAL_EFFECT         = packets.GraphicalEffectPacket.cmd
-	DRAW_GAME_PLAYER         = packets.DrawGamePlayerPacket.cmd
-	OVERALL_LIGHT_LEVEL      = packets.OverallLightLevelPacket.cmd
-	SEND_SPEECH              = packets.SendSpeechPacket.cmd
-	UNICODE_SPEECH           = packets.UnicodeSpeechPacket.cmd
-	PLAY_MIDI                = packets.PlayMidiPacket.cmd
-	WAR_MODE                 = packets.WarModePacket.cmd
-	LOGIN_COMPLETE           = packets.LoginCompletePacket.cmd
-	SET_WEATHER              = packets.SetWeatherPacket.cmd
-	SEASON_INFO              = packets.SeasonInfoPacket.cmd
-	DRAW_OBJECT              = packets.DrawObjectPacket.cmd
-	UPDATE_PLAYER            = packets.UpdatePlayerPacket.cmd
-	OBJECT_INFO              = packets.ObjectInfoPacket.cmd
-	DELETE_OBJECT            = packets.DeleteObjectPacket.cmd
-	DRAW_CONTAINER           = packets.DrawContainerPacket.cmd
-	ADD_ITEM_TO_CONTAINER    = packets.AddItemToContainerPacket.cmd
-	ADD_ITEMS_TO_CONTAINER   = packets.AddItemsToContainerPacket.cmd
-	ALLOW_ATTACK             = packets.AllowAttackPacket.cmd
-	TIP_WINDOW               = packets.TipWindowPacket.cmd
-	PLAY_SOUND               = packets.PlaySoundPacket.cmd
-	LOGIN_DENIED             = packets.LoginDeniedPacket.cmd
-	UPDATE_HEALTH            = packets.UpdateHealthPacket.cmd
-	UPDATE_MANA              = packets.UpdateManaPacket.cmd
-	UPDATE_STAMINA           = packets.UpdateStaminaPacket.cmd
-	STATUS_BAR_INFO          = packets.StatusBarInfoPacket.cmd
-	SEND_SKILL               = packets.SendSkillsPacket.cmd
-	SEND_GUMP                = packets.SendGumpDialogPacket.cmd
-	COMPRESSED_GUMP          = packets.CompressedGumpPacket.cmd
-	TARGET_CURSOR            = packets.TargetCursorPacket.cmd
-	MEGACLILOCREV            = packets.MegaClilocRevPacket.cmd
-	CLILOCMSG                = packets.ClilocMsgPacket.cmd
-	MOB_ATTRIBUTES           = packets.MobAttributesPacket.cmd
-
-	HANDLERS = {
-		SERVER_LIST:              packets.ServerListPacket,
-		CONNECT_TO_GAME_SERVER:   packets.ConnectToGameServerPacket,
-		PING:                     packets.PingPacket,
-		ENABLE_FEATURES:          packets.EnableFeaturesPacket,
-		CHARACTERS:               packets.CharactersPacket,
-		CHAR_LOCALE_BODY:         packets.CharLocaleBodyPacket,
-		GENERAL_INFO:             packets.GeneralInfoPacket,
-		UNKNOWN_32:               packets.Unk32Packet,
-		CONTROL_ANIMATION:        packets.ControlAnimationPacket,
-		CHARACTER_ANIMATION:      packets.CharacterAnimationPacket,
-		GRAPHICAL_EFFECT:         packets.GraphicalEffectPacket,
-		DRAW_GAME_PLAYER:         packets.DrawGamePlayerPacket,
-		OVERALL_LIGHT_LEVEL:      packets.OverallLightLevelPacket,
-		SEND_SPEECH:              packets.SendSpeechPacket,
-		UNICODE_SPEECH:           packets.UnicodeSpeechPacket,
-		PLAY_MIDI:                packets.PlayMidiPacket,
-		WAR_MODE:                 packets.WarModePacket,
-		LOGIN_COMPLETE:           packets.LoginCompletePacket,
-		SET_WEATHER:              packets.SetWeatherPacket,
-		SEASON_INFO:              packets.SeasonInfoPacket,
-		DRAW_OBJECT:              packets.DrawObjectPacket,
-		UPDATE_PLAYER:            packets.UpdatePlayerPacket,
-		OBJECT_INFO:              packets.ObjectInfoPacket,
-		DELETE_OBJECT:            packets.DeleteObjectPacket,
-		DRAW_CONTAINER:           packets.DrawContainerPacket,
-		ADD_ITEM_TO_CONTAINER:    packets.AddItemToContainerPacket,
-		ADD_ITEMS_TO_CONTAINER:   packets.AddItemsToContainerPacket,
-		ALLOW_ATTACK:             packets.AllowAttackPacket,
-		TIP_WINDOW:               packets.TipWindowPacket,
-		PLAY_SOUND:               packets.PlaySoundPacket,
-		LOGIN_DENIED:             packets.LoginDeniedPacket,
-		UPDATE_HEALTH:            packets.UpdateHealthPacket,
-		UPDATE_MANA:              packets.UpdateManaPacket,
-		UPDATE_STAMINA:           packets.UpdateStaminaPacket,
-		STATUS_BAR_INFO:          packets.StatusBarInfoPacket,
-		SEND_SKILL:               packets.SendSkillsPacket,
-		SEND_GUMP:                packets.SendGumpDialogPacket,
-		COMPRESSED_GUMP:          packets.CompressedGumpPacket,
-		TARGET_CURSOR:            packets.TargetCursorPacket,
-		MEGACLILOCREV:            packets.MegaClilocRevPacket,
-		CLILOCMSG:                packets.ClilocMsgPacket,
-		MOB_ATTRIBUTES:           packets.MobAttributesPacket,
-	}
-
-	@staticmethod
-	def process(buf):
-		''' Init next packet from buffer, returns a packet instance '''
-		cmd = buf[0]
-		try:
-			pktClass = Ph.HANDLERS[cmd]
-		except KeyError:
-			raise NotImplementedError("Unknown packet 0x%0.2X, %d bytes\n%s" % (cmd, len(buf), buf))
-		pkt = pktClass()
-		pkt.decode(buf)
-		return pkt
 
 
 class NoFullPacketError(Exception):
