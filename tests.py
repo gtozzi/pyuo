@@ -9,11 +9,20 @@ import unittest
 import re
 import inspect
 
-from pyuo import packets
+# Even if it's bad pratice, import everything to check for syntax errors
+from pyuo import *
 
 
-class TestPacketsOrder(unittest.TestCase):
-	''' Ensures packets are defined in the right order '''
+class TestClient(unittest.TestCase):
+	''' Client tests '''
+
+	def test_instance(self):
+		''' Chec that an instance can be created '''
+		cli = client.Client()
+
+
+class TestSource(unittest.TestCase):
+	''' Source code tests '''
 
 	# List of base classes
 	BASE = (
@@ -21,7 +30,8 @@ class TestPacketsOrder(unittest.TestCase):
 		'UpdateVitalPacket',
 	)
 
-	def test(self):
+	def testPacketsOrder(self):
+		''' Ensures packets are defined in the right order '''
 		classInfo = {}
 		for name, obj in inspect.getmembers(packets):
 			if name.startswith('__'):
