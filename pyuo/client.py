@@ -676,308 +676,330 @@ class Client(threading.Thread):
 			# Process packet
 			if pkt is None:
 				time.sleep(0.01)
-
-			elif isinstance(pkt, packets.LoginDeniedPacket):
-				self.log.error('login denied')
-				raise LoginDeniedError(pkt.reason)
-
-			elif isinstance(pkt, packets.PingPacket):
-				self.log.debug("Server sent a ping back")
-
-			elif isinstance(pkt, packets.CharLocaleBodyPacket):
-				assert not self.lc
-
-				assert self.player is None
-				self.player = Player(self)
-
-				assert self.player.serial is None
-				self.player.serial = pkt.serial
-				assert self.player.graphic is None
-				self.player.graphic = pkt.bodyType
-				assert self.player.x is None
-				self.player.x = pkt.x
-				assert self.player.y is None
-				self.player.y = pkt.y
-				assert self.player.z is None
-				self.player.z = pkt.z
-				assert self.player.facing is None
-				self.player.facing = pkt.facing
-				assert self.width is None
-				self.width = pkt.widthM8 + 8
-				assert self.height is None
-				self.height = pkt.height
-
-				assert self.player.serial not in self.objects.keys()
-				self.objects[self.player.serial] = self.player
-
-				self.log.info("Realm size: %d,%d", self.width, self.height)
-				self.log.info("You are 0x%X and your graphic is 0x%X", self.player.serial, self.player.graphic)
-				self.log.info("Position: %d,%d,%d facing %d", self.player.x, self.player.y, self.player.z, self.player.facing)
-
-			elif isinstance(pkt, packets.DrawGamePlayerPacket):
-				assert self.player.serial == pkt.serial
-				assert self.player.graphic == pkt.graphic
-				assert self.player.x == pkt.x
-				assert self.player.y == pkt.y
-				assert self.player.z == pkt.z
-				#assert self.player.facing == pkt.direction
-
-				self.player.color = pkt.hue
-				self.player.status = pkt.flag
-
-				self.log.info("Your color is %d and your status is 0x%X", self.player.color, self.player.status)
-
-			elif isinstance(pkt, packets.DrawObjectPacket):
-				assert self.lc
-				if pkt.serial in self.objects.keys():
-					self.objects[pkt.serial].update(pkt)
-					self.log.info("Refreshed mobile: %s", self.objects[pkt.serial])
-				else:
-					mob = Mobile(self, pkt)
-					self.objects[mob.serial] = mob
-					self.log.info("New mobile: %s", mob)
-					self.brain.event(brain.Event(brain.Event.EVT_NEW_MOBILE, mobile=mob))
-					# Auto single click for new mobiles
-					self.singleClick(mob)
-
-			elif isinstance(pkt, packets.ObjectInfoPacket):
-				assert self.lc
-				if pkt.serial in self.objects.keys():
-					self.objects[pkt.serial].update(pkt)
-					self.log.info("Refresh item: %s", self.objects[pkt.serial])
-				else:
-					item = Item(self, pkt)
-					self.log.info("New item: %s", item)
-					self.objects[item.serial] = item
-
-			elif isinstance(pkt, packets.UpdatePlayerPacket):
-				assert self.lc
-				self.objects[pkt.serial].update(pkt)
-				self.log.info("Updated mobile: %s", self.objects[pkt.serial])
-
-			elif isinstance(pkt, packets.DeleteObjectPacket):
-				assert self.lc
-				if pkt.serial in self.objects:
-					del self.objects[pkt.serial]
-					self.log.info("Object 0x%X went out of sight", pkt.serial)
-				else:
-					self.log.warn("Server requested to delete 0x%X but i don't know it", pkt.serial)
-
-			elif isinstance(pkt, packets.AddItemToContainerPacket):
-				assert self.lc
-				if isinstance(self.objects[pkt.container], Container):
-					self.objects[pkt.container].addItem(pkt)
-				else:
-					self.log.warn("Ignoring add item 0x%X to non-container 0x%X", pkt.serial, pkt.container)
-
-			elif isinstance(pkt, packets.AddItemsToContainerPacket):
-				assert self.lc
-				for it in pkt.items:
-					if isinstance(self.objects[it['container']], Container):
-						self.objects[it['container']].addItem(it)
-					else:
-						self.log.warn("Ignoring add item 0x%X to non-container 0x%X", it['serial'], it['container'])
-
-			elif isinstance(pkt, packets.WarModePacket):
-				assert self.player.war is None
-				self.player.war = pkt.war
-
-			elif isinstance(pkt, packets.AllowAttackPacket):
-				assert self.lc
-				self.player.target = pkt.serial
-				self.log.info("Target set to 0x%X", self.player.target)
-
-			elif isinstance(pkt, packets.UpdateHealthPacket):
-				assert self.lc
-				old = self.player.hp
-				if self.player.serial == pkt.serial:
-					self.player.maxhp = pkt.max
-					self.player.hp = pkt.cur
-					self.log.info("My HP: %d/%d", pkt.cur, pkt.max)
-				else:
-					mob = self.objects[pkt.serial]
-					mob.maxhp = pkt.max
-					mob.hp = pkt.cur
-					self.log.info("0x%X's HP: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				self.brain.event(brain.Event(brain.Event.EVT_HP_CHANGED, old=old, new=self.player.hp))
-
-			elif isinstance(pkt, packets.UpdateManaPacket):
-				assert self.lc
-				old = self.player.mana
-				if self.player.serial == pkt.serial:
-					self.player.maxmana = pkt.max
-					self.player.mana = pkt.cur
-					self.log.info("My MANA: %d/%d", pkt.cur, pkt.max)
-				else:
-					mob = self.objects[pkt.serial]
-					mob.maxmana = pkt.max
-					mob.mana = pkt.cur
-					self.log.info("0x%X's MANA: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				self.brain.event(brain.Event(brain.Event.EVT_MANA_CHANGED, old=old, new=self.player.mana))
-
-			elif isinstance(pkt, packets.UpdateStaminaPacket):
-				assert self.lc
-				old = self.player.stam
-				if self.player.serial == pkt.serial:
-					self.player.maxstam = pkt.max
-					self.player.stam = pkt.cur
-					self.log.info("My STAM: %d/%d", pkt.cur, pkt.max)
-				else:
-					mob = self.objects[pkt.serial]
-					mob.maxstam = pkt.max
-					mob.stam = pkt.cur
-					self.log.info("0x%X's STAM: %d/%d", pkt.serial, pkt.cur, pkt.max)
-				self.brain.event(brain.Event(brain.Event.EVT_STAM_CHANGED, old=old, new=self.player.stam))
-
-			elif isinstance(pkt, packets.GeneralInfoPacket):
-				if pkt.sub == packets.GeneralInfoPacket.SUB_CURSORMAP:
-					self.cursor = pkt.cursor
-				elif pkt.sub == packets.GeneralInfoPacket.SUB_MAPDIFF:
-					pass
-				elif pkt.sub == packets.GeneralInfoPacket.SUB_PARTY:
-					self.log.info("Ignoring party system data")
-				else:
-					self.log.warn("Unhandled GeneralInfo subpacket 0x%X", pkt.sub)
-
-			elif isinstance(pkt, packets.DrawContainerPacket):
-				cont = self.objects[pkt.serial]
-				assert isinstance(cont, Item)
-				if not isinstance(cont, Container):
-					# Upgrade the item to a Container
-					cont.upgradeToContainer()
-
-			elif isinstance(pkt, packets.TipWindowPacket):
-				assert self.lc
-				self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
-
-			elif isinstance(pkt, packets.SendSpeechPacket) or isinstance(pkt, packets.UnicodeSpeechPacket):
-				speech = Speech(self, pkt)
-				if self.lc:
-					self.log.info(repr(speech))
-				else:
-					self.log.warn('EARLY %s', repr(speech))
-				self.brain.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
-
-			elif isinstance(pkt, packets.TargetCursorPacket):
-				assert self.target is None
-				self.target = Target(self, pkt)
-
-			elif isinstance(pkt, packets.CharacterAnimationPacket):
-				assert self.lc
-				# Just check that the object exists
-				self.objects[pkt.serial]
-
-			elif isinstance(pkt, packets.LoginCompletePacket):
-				assert not self.lc
-				assert self.player is not None
-				self.lc = True
-				# Send some initial info packets      ..
-				self.requestSkills()
-				self.sendVersion()
-				# Original client also sends this now
-				# bf 00 0d 00 05 00 00 03 20 01 00 00 a7 - General info 0x05
-				self.sendClientType()
-				# Original client also sends this now, seems to also send it again later
-				# 34 ed ed ed ed 04 00 45 dd f5 - Get Player status something
-				self.sendLanguage()
-				self.singleClick(self.player)
-
-				# Start the brain
-				self.brain.started.set()
-
-			elif isinstance(pkt, packets.MoveAckPacket) or isinstance(pkt, packets.MoveRejectPacket):
-				if isinstance(pkt, packets.MoveAckPacket):
-					ack = True
-				else:
-					ack = False
-
-				with self.moveLock:
-					# Match first move packet to be ackowledged
-					mpkt = self.unmoves.popleft()
-					assert pkt.sequence == pkt.sequence
-
-					if not ack:
-						# Reset sequence counter after a reject
-						self.moveid = -1
-
-				oldx = self.player.x
-				oldy = self.player.y
-				oldz = self.player.z
-				oldfacing = self.player.facing
-
-				if ack:
-					# Need to calculate (guess) the new position, since this
-					# packets does not cointain position information
-					if mpkt.direction == self.player.facing:
-						# Moving in front of me, doing one step
-						if mpkt.direction == Direction.N:
-							self.player.y -= 1
-						elif mpkt.direction == Direction.NE:
-							self.player.y -= 1
-							self.player.x += 1
-						elif mpkt.direction == Direction.E:
-							self.player.x += 1
-						elif mpkt.direction == Direction.SE:
-							self.player.y += 1
-							self.player.x += 1
-						elif mpkt.direction == Direction.S:
-							self.player.y += 1
-						elif mpkt.direction == Direction.SW:
-							self.player.y += 1
-							self.player.x -= 1
-						elif mpkt.direction == Direction.W:
-							self.player.x -= 1
-						elif mpkt.direction == Direction.NW:
-							self.player.y -= 1
-							self.player.x -= 1
-					else:
-						# Changing direction, just change facing
-						self.player.facing = mpkt.direction
-				else:
-					# The reject packet has the position so it's easier
-					self.player.x = pkt.x
-					self.player.y = pkt.y
-					self.player.z = pkt.z
-					self.player.facing = pkt.direction
-
-				self.brain.event(brain.Event(brain.Event.EVT_MOVED,
-						oldx=oldx, oldy=oldy, oldz=oldz, oldfacing=oldfacing,
-						x=self.player.x, y=self.player.y, z=self.player.z,
-						facing=self.player.facing, ack=ack))
-
-				# Handle the notoriety
-				if ack and self.player.notoriety != pkt.notoriety:
-					old = self.player.notoriety
-					self.player.notoriety = pkt.notoriety
-					self.brain.event(brain.Event(brain.Event.EVT_NOTORIETY,
-							old=old, new=self.player.notoriety))
-
-			elif isinstance(pkt, packets.Unk32Packet):
-				self.log.warn("Unknown 0x32 packet received")
-
-			elif isinstance(pkt, packets.ControlAnimationPacket):
-				assert self.lc
-				self.log.info('Ignoring animation packet')
-
-			elif isinstance(pkt, packets.GraphicalEffectPacket):
-				assert self.lc
-				self.log.info('Graphical effect packet')
-
-			elif isinstance(pkt, packets.PlaySoundPacket):
-				assert self.lc
-				self.log.info('Ignoring sound packet')
-
-			elif isinstance(pkt, packets.SetWeatherPacket):
-				self.log.info('Ignoring weather packet')
-
-			elif isinstance(pkt, packets.OverallLightLevelPacket):
-				self.log.info('Ignoring light level packet')
-
-			elif isinstance(pkt, packets.SeasonInfoPacket):
-				self.log.info('Ignoring season packet')
-
 			else:
-				self.log.warn("Unhandled packet {}".format(pkt.__class__))
+				self.handlePacket(pkt)
+
+	@status('game')
+	@clientthread
+	def handlePacket(self, pkt):
+		''' Handles an incoming packet '''
+
+		if isinstance(pkt, packets.LoginDeniedPacket):
+			self.log.error('login denied')
+			raise LoginDeniedError(pkt.reason)
+
+		elif isinstance(pkt, packets.PingPacket):
+			self.log.debug("Server sent a ping back")
+
+		elif isinstance(pkt, packets.CharLocaleBodyPacket):
+			self.handleCharLocaleBodyPacket(pkt)
+
+		elif isinstance(pkt, packets.DrawGamePlayerPacket):
+			self.handleDrawGamePlayerPacket(pkt)
+
+		elif isinstance(pkt, packets.DrawObjectPacket):
+			self.handleDrawObjectPacket(pkt)
+
+		elif isinstance(pkt, packets.ObjectInfoPacket):
+			self.handleObjectInfoPacket(pkt)
+
+		elif isinstance(pkt, packets.UpdatePlayerPacket):
+			assert self.lc
+			self.objects[pkt.serial].update(pkt)
+			self.log.info("Updated mobile: %s", self.objects[pkt.serial])
+
+		elif isinstance(pkt, packets.DeleteObjectPacket):
+			assert self.lc
+			if pkt.serial in self.objects:
+				del self.objects[pkt.serial]
+				self.log.info("Object 0x%X went out of sight", pkt.serial)
+			else:
+				self.log.warn("Server requested to delete 0x%X but i don't know it", pkt.serial)
+
+		elif isinstance(pkt, packets.AddItemToContainerPacket):
+			assert self.lc
+			if isinstance(self.objects[pkt.container], Container):
+				self.objects[pkt.container].addItem(pkt)
+			else:
+				self.log.warn("Ignoring add item 0x%X to non-container 0x%X", pkt.serial, pkt.container)
+
+		elif isinstance(pkt, packets.AddItemsToContainerPacket):
+			assert self.lc
+			for it in pkt.items:
+				if isinstance(self.objects[it['container']], Container):
+					self.objects[it['container']].addItem(it)
+				else:
+					self.log.warn("Ignoring add item 0x%X to non-container 0x%X", it['serial'], it['container'])
+
+		elif isinstance(pkt, packets.WarModePacket):
+			assert self.player.war is None
+			self.player.war = pkt.war
+
+		elif isinstance(pkt, packets.AllowAttackPacket):
+			assert self.lc
+			self.player.target = pkt.serial
+			self.log.info("Target set to 0x%X", self.player.target)
+
+		elif isinstance(pkt, packets.UpdateHealthPacket):
+			self.handleUpdateVitalPacket(pkt, 'hp', 'maxhp', brain.Event.EVT_HP_CHANGED)
+
+		elif isinstance(pkt, packets.UpdateManaPacket):
+			self.handleUpdateVitalPacket(pkt, 'mana', 'maxmana', brain.Event.EVT_MANA_CHANGED)
+
+		elif isinstance(pkt, packets.UpdateStaminaPacket):
+			self.handleUpdateVitalPacket(pkt, 'stam', 'maxstam', brain.Event.EVT_STAM_CHANGED)
+
+		elif isinstance(pkt, packets.GeneralInfoPacket):
+			self.handleGeneralInfoPacket(pkt)
+
+		elif isinstance(pkt, packets.DrawContainerPacket):
+			cont = self.objects[pkt.serial]
+			assert isinstance(cont, Item)
+			if not isinstance(cont, Container):
+				# Upgrade the item to a Container
+				cont.upgradeToContainer()
+
+		elif isinstance(pkt, packets.TipWindowPacket):
+			assert self.lc
+			self.log.info("Received tip: %s", pkt.msg.replace('\r','\n'))
+
+		elif isinstance(pkt, packets.SendSpeechPacket) or isinstance(pkt, packets.UnicodeSpeechPacket):
+			speech = Speech(self, pkt)
+			if self.lc:
+				self.log.info(repr(speech))
+			else:
+				self.log.warn('EARLY %s', repr(speech))
+			self.brain.event(brain.Event(brain.Event.EVT_SPEECH, speech=speech))
+
+		elif isinstance(pkt, packets.TargetCursorPacket):
+			assert self.target is None
+			self.target = Target(self, pkt)
+
+		elif isinstance(pkt, packets.CharacterAnimationPacket):
+			assert self.lc
+			# Just check that the object exists
+			self.objects[pkt.serial]
+
+		elif isinstance(pkt, packets.LoginCompletePacket):
+			assert not self.lc
+			assert self.player is not None
+			self.lc = True
+			# Send some initial info packets      ..
+			self.requestSkills()
+			self.sendVersion()
+			# Original client also sends this now
+			# bf 00 0d 00 05 00 00 03 20 01 00 00 a7 - General info 0x05
+			self.sendClientType()
+			# Original client also sends this now, seems to also send it again later
+			# 34 ed ed ed ed 04 00 45 dd f5 - Get Player status something
+			self.sendLanguage()
+			self.singleClick(self.player)
+
+			# Start the brain
+			self.brain.started.set()
+
+		elif isinstance(pkt, packets.MoveAckPacket) or isinstance(pkt, packets.MoveRejectPacket):
+			self.handleMovePacket(pkt)
+
+		elif isinstance(pkt, packets.Unk32Packet):
+			self.log.warn("Unknown 0x32 packet received")
+
+		elif isinstance(pkt, packets.ControlAnimationPacket):
+			assert self.lc
+			self.log.info('Ignoring animation packet')
+
+		elif isinstance(pkt, packets.GraphicalEffectPacket):
+			assert self.lc
+			self.log.info('Graphical effect packet')
+
+		elif isinstance(pkt, packets.PlaySoundPacket):
+			assert self.lc
+			self.log.info('Ignoring sound packet')
+
+		elif isinstance(pkt, packets.SetWeatherPacket):
+			self.log.info('Ignoring weather packet')
+
+		elif isinstance(pkt, packets.OverallLightLevelPacket):
+			self.log.info('Ignoring light level packet')
+
+		elif isinstance(pkt, packets.SeasonInfoPacket):
+			self.log.info('Ignoring season packet')
+
+		else:
+			self.log.warn("Unhandled packet {}".format(pkt.__class__))
+
+	@status('game')
+	@clientthread
+	def handleCharLocaleBodyPacket(self, pkt):
+		assert not self.lc
+
+		assert self.player is None
+		self.player = Player(self)
+
+		assert self.player.serial is None
+		self.player.serial = pkt.serial
+		assert self.player.graphic is None
+		self.player.graphic = pkt.bodyType
+		assert self.player.x is None
+		self.player.x = pkt.x
+		assert self.player.y is None
+		self.player.y = pkt.y
+		assert self.player.z is None
+		self.player.z = pkt.z
+		assert self.player.facing is None
+		self.player.facing = pkt.facing
+		assert self.width is None
+		self.width = pkt.widthM8 + 8
+		assert self.height is None
+		self.height = pkt.height
+
+		assert self.player.serial not in self.objects.keys()
+		self.objects[self.player.serial] = self.player
+
+		self.log.info("Realm size: %d,%d", self.width, self.height)
+		self.log.info("You are 0x%X and your graphic is 0x%X", self.player.serial, self.player.graphic)
+		self.log.info("Position: %d,%d,%d facing %d", self.player.x, self.player.y, self.player.z, self.player.facing)
+
+	@status('game')
+	@clientthread
+	def handleDrawGamePlayerPacket(self, pkt):
+		assert self.player.serial == pkt.serial
+		assert self.player.graphic == pkt.graphic
+		assert self.player.x == pkt.x
+		assert self.player.y == pkt.y
+		assert self.player.z == pkt.z
+		#assert self.player.facing == pkt.direction
+
+		self.player.color = pkt.hue
+		self.player.status = pkt.flag
+
+		self.log.info("Your color is %d and your status is 0x%X", self.player.color, self.player.status)
+
+	@status('game')
+	@clientthread
+	@logincomplete
+	def handleDrawObjectPacket(self, pkt):
+		if pkt.serial in self.objects.keys():
+			self.objects[pkt.serial].update(pkt)
+			self.log.info("Refreshed mobile: %s", self.objects[pkt.serial])
+		else:
+			mob = Mobile(self, pkt)
+			self.objects[mob.serial] = mob
+			self.log.info("New mobile: %s", mob)
+			self.brain.event(brain.Event(brain.Event.EVT_NEW_MOBILE, mobile=mob))
+			# Auto single click for new mobiles
+			self.singleClick(mob)
+
+	@status('game')
+	@clientthread
+	@logincomplete
+	def handleObjectInfoPacket(self, pkt):
+		if pkt.serial in self.objects.keys():
+			self.objects[pkt.serial].update(pkt)
+			self.log.info("Refresh item: %s", self.objects[pkt.serial])
+		else:
+			item = Item(self, pkt)
+			self.log.info("New item: %s", item)
+			self.objects[item.serial] = item
+
+	@status('game')
+	@clientthread
+	@logincomplete
+	def handleUpdateVitalPacket(self, pkt, attrName, maxAttrName, eventId):
+		old = getattr(self.player, attrName)
+		if self.player.serial == pkt.serial:
+			setattr(self.player, maxAttrName, pkt.max)
+			setattr(self.player, attrName, pkt.cur)
+			self.log.info("My %s: %d/%d", attrName.upper(), pkt.cur, pkt.max)
+		else:
+			mob = self.objects[pkt.serial]
+			setattr(mob, maxAttrName, pkt.max)
+			setattr(mob, attrName, pkt.cur)
+			self.log.info("0x%X's %s: %d/%d", pkt.serial, attrName.upper(), pkt.cur, pkt.max)
+		cur = getattr(self.player, attrName)
+		self.brain.event(brain.Event(eventId, old=old, new=cur))
+
+	@status('game')
+	@clientthread
+	def handleGeneralInfoPacket(self, pkt):
+		if pkt.sub == packets.GeneralInfoPacket.SUB_CURSORMAP:
+			self.cursor = pkt.cursor
+		elif pkt.sub == packets.GeneralInfoPacket.SUB_MAPDIFF:
+			pass
+		elif pkt.sub == packets.GeneralInfoPacket.SUB_PARTY:
+			self.log.info("Ignoring party system data")
+		else:
+			self.log.warn("Unhandled GeneralInfo subpacket 0x%X", pkt.sub)
+
+	@status('game')
+	@clientthread
+	@logincomplete
+	def handleMovePacket(self, pkt):
+		if isinstance(pkt, packets.MoveAckPacket):
+			ack = True
+		else:
+			ack = False
+
+		with self.moveLock:
+			# Match first move packet to be ackowledged
+			mpkt = self.unmoves.popleft()
+			assert pkt.sequence == pkt.sequence
+
+			if not ack:
+				# Reset sequence counter after a reject
+				self.moveid = -1
+
+		oldx = self.player.x
+		oldy = self.player.y
+		oldz = self.player.z
+		oldfacing = self.player.facing
+
+		if ack:
+			# Need to calculate (guess) the new position, since this
+			# packets does not cointain position information
+			if mpkt.direction == self.player.facing:
+				# Moving in front of me, doing one step
+				if mpkt.direction == Direction.N:
+					self.player.y -= 1
+				elif mpkt.direction == Direction.NE:
+					self.player.y -= 1
+					self.player.x += 1
+				elif mpkt.direction == Direction.E:
+					self.player.x += 1
+				elif mpkt.direction == Direction.SE:
+					self.player.y += 1
+					self.player.x += 1
+				elif mpkt.direction == Direction.S:
+					self.player.y += 1
+				elif mpkt.direction == Direction.SW:
+					self.player.y += 1
+					self.player.x -= 1
+				elif mpkt.direction == Direction.W:
+					self.player.x -= 1
+				elif mpkt.direction == Direction.NW:
+					self.player.y -= 1
+					self.player.x -= 1
+			else:
+				# Changing direction, just change facing
+				self.player.facing = mpkt.direction
+		else:
+			# The reject packet has the position so it's easier
+			self.player.x = pkt.x
+			self.player.y = pkt.y
+			self.player.z = pkt.z
+			self.player.facing = pkt.direction
+
+		self.brain.event(brain.Event(brain.Event.EVT_MOVED,
+				oldx=oldx, oldy=oldy, oldz=oldz, oldfacing=oldfacing,
+				x=self.player.x, y=self.player.y, z=self.player.z,
+				facing=self.player.facing, ack=ack))
+
+		# Handle the notoriety
+		if ack and self.player.notoriety != pkt.notoriety:
+			old = self.player.notoriety
+			self.player.notoriety = pkt.notoriety
+			self.brain.event(brain.Event(brain.Event.EVT_NOTORIETY,
+					old=old, new=self.player.notoriety))
 
 	@logincomplete
 	def sendVersion(self):
