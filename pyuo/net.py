@@ -89,7 +89,7 @@ class Network:
 	)
 
 	def __init__(self, ip, port):
-		''' Connects to the socket
+		'''! Connects to the socket
 			@param ip IPv4Address: the IP object, from the ipaddress module
 			@param port int: the port
 		'''
@@ -121,7 +121,7 @@ class Network:
 		self.sock.send(raw)
 
 	def recv(self, force=False, blocking=True):
-		''' Reads next packet from the server
+		'''! Reads next packet from the server
 		Always returns a full packet (waiting for full packet is always blocking)
 
 		@param force bool: Force wait, used internally
@@ -179,7 +179,7 @@ class Network:
 		return pkt
 
 	def decompress(self, buf):
-		''' Internal usage, decompress a packet (thanks to UltimaXNA project
+		'''! Internal usage, decompress a packet (thanks to UltimaXNA project
 		@return tuple (decompressed, compressed_size)
 		'''
 		node = 0

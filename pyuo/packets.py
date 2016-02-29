@@ -45,7 +45,7 @@ class Packet():
 		raise NotImplementedError('This packet cannot be sent')
 
 	def decode(self, buf):
-		''' Parses the data from the given buffer into this packet instance
+		'''! Parses the data from the given buffer into this packet instance
 		@see decodeChild
 		@param buf binary: The binary buffer, as received from server
 		'''
@@ -69,7 +69,7 @@ class Packet():
 		raise NotImplementedError('this method must be overridden')
 
 	def encode(self):
-		''' Encodes the data into a buffer and returns it
+		'''! Encodes the data into a buffer and returns it
 		@see encodeChild
 		@return binary: The binary buffer, ready to be sent to server
 		'''
@@ -255,7 +255,7 @@ class SerialOnlyPacket(Packet):
 	length = 5
 
 	def fill(self, serial):
-		'''
+		'''!
 		@param serial int: The object serial
 		'''
 		self.serial = serial
@@ -279,7 +279,7 @@ class MoveRequestPacket(Packet):
 	length = 7
 
 	def fill(self, direction, sequence):
-		'''
+		'''!
 		@param direction int: The direction code (0-7)
 		@param sequence int: The sequence code (0-255)
 		'''
@@ -683,7 +683,7 @@ class LoginCharacterPacket(Packet):
 	length = 73
 
 	def fill(self, name, idx):
-		'''
+		'''!
 		@param name string: The character name
 		@param int: The character slot index
 		'''
@@ -733,7 +733,7 @@ class TargetCursorPacket(Packet):
 	length = 19
 
 	def fill(self, what, id, type, serial, x=0, y=0, z=0, graphic=0):
-		'''
+		'''!
 		@param what int: what to target, see constants
 		@param id int: The id of the target that we are answering to
 		@param type int: The target type, see constants
@@ -850,7 +850,7 @@ class PingPacket(Packet):
 	length = 2
 
 	def fill(self, seq):
-		'''
+		'''!
 		@param seq int: Sequence number
 		'''
 		self.seq = seq
@@ -924,7 +924,7 @@ class LoginRequestPacket(Packet):
 	length = 62
 
 	def fill(self, account, password, nlk=0):
-		'''
+		'''!
 		@param account string: The username
 		@param password string: The password
 		@param nlk byte: NextLoginKey value from uo.cfg on client machine
@@ -968,7 +968,7 @@ class GameServerLoginPacket(Packet):
 	length = 65
 
 	def fill(self, key, account, password):
-		'''
+		'''!
 		@param key: The key used
 		@param account string: The username
 		@param password string: The password
@@ -1094,7 +1094,7 @@ class UnicodeSpeechRequestPacket(Packet):
 	cmd = 0xad
 
 	def fill(self, type, lang, text, color, font):
-		'''
+		'''!
 		@param type int: Speech type, see TYP_ constants
 		@param lang string: Three letter language code
 		@param text string: What to say
@@ -1183,7 +1183,7 @@ class ClientVersionPacket(Packet):
 	cmd = 0xbd
 
 	def fill(self, version):
-		'''
+		'''!
 		@param version string: The client, version, as string
 		'''
 		self.version = version
@@ -1229,7 +1229,7 @@ class GeneralInfoPacket(Packet):
 	cmd = 0xbf
 
 	def fill(self, sub, *args):
-		'''
+		'''!
 		@param sub int: The subcommand, see SUB_ constants
 		@param *args: Variable number of arguments, depending on sub:
 		              - SUB_LOGIN: no more arguments needed

@@ -530,7 +530,7 @@ class Client(threading.Thread):
 
 	@status('disconnected')
 	def connect(self, host, port, user, pwd):
-		''' Conmnects to the server, returns a list of gameservers
+		'''! Connnects to the server, returns a list of gameservers
 			@param host string: Server IP address or hostname
 			@param port string: Server port
 			@param user string: Username
@@ -1086,7 +1086,7 @@ class Client(threading.Thread):
 
 	@logincomplete
 	def waitForTarget(self, timeout=None):
-		''' Waits until a target cursor is requested and return it. If timeout is given, returns after timeout
+		'''! Waits until a target cursor is requested and return it. If timeout is given, returns after timeout
 		@param timeout float: Timeout, in seconds
 		@return Target on success, None on timeout
 		'''
@@ -1094,7 +1094,7 @@ class Client(threading.Thread):
 		return self.target
 
 	def waitFor(self, cond, timeout=None):
-		''' Utility function, waits until a condition is satisfied or until timeout expires
+		'''! Utility function, waits until a condition is satisfied or until timeout expires
 		@return True when consition succeeds, False on timeout
 		'''
 		wait = 0.0
@@ -1127,7 +1127,7 @@ class Client(threading.Thread):
 
 	@clientthread
 	def receive(self, expect=None, blocking=True):
-		''' Receives next packet from the server
+		'''! Receives next packet from the server
 		@param expect Packet/list: If given, throws an exception if packet
 		                           is not in the expected list/tuple
 		@return Packet

@@ -32,7 +32,7 @@ class Brain:
 	'''
 
 	def __init__(self, client):
-		''' Initialize the object, must provide a connected client instance
+		'''! Initialize the object, must provide a connected client instance
 		@param client Client: a client instance, already connected, will start it
 		'''
 		self.log = logging.getLogger('brain')
@@ -134,7 +134,7 @@ class Brain:
 		print('Brain inited')
 
 	def loop(self):
-		''' This is called once every main loop iteration, the main brain's loop
+		'''! This is called once every main loop iteration, the main brain's loop
 		@return Return true to terminate the program
 		'''
 		print('Brain running, nothing to do...')
